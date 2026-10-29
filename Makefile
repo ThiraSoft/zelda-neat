@@ -43,7 +43,8 @@ DATASET ?= /mnt/data/datasets/zelda
 DATASET_GB ?= 50
 # cœurs libres au lancement : nproc moins la charge moyenne sur 1 min, au moins 1
 DATASET_WORKERS ?= $(shell awk -v n=$$(nproc) '{w = n - int($$1 + 0.5); print (w < 1 ? 1 : w)}' /proc/loadavg)
-DATASET_MODEL ?= models/ppo.pt
+# modèles PPO, à parts égales dans les parties jouées par un modèle ; vide = tout au hasard
+DATASET_MODEL ?= models/ppo.pt models/ppo-kills.pt
 # part des parties jouées par le modèle, le reste au hasard
 DATASET_MODEL_FRAC ?= 0.7
 # cellules de départ (8 par salle au plus, tirées de runs/horon/archive)
@@ -67,7 +68,7 @@ START = $(firstword $(wildcard $(STATES)))
 endif
 MAKE_DATASET = $(PPO_PY) dataset.py --archive $(DATASET_ARCHIVE) --out $(DATASET) --max-gb $(DATASET_GB) \
 	--workers $(DATASET_WORKERS) --start $(firstword $(wildcard $(STATES))) \
-	--model "$(DATASET_MODEL)" --model-frac $(DATASET_MODEL_FRAC)
+	--model $(DATASET_MODEL) --model-frac $(DATASET_MODEL_FRAC)
 PPO_RESUME = $(if $(wildcard $(PPO_RUN)/ckpt.pt),--resume,)
 PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword $(wildcard $(STATES))) \
 	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) \

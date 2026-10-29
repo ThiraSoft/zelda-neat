@@ -187,6 +187,7 @@ Dans `PPO_RUN/` : `model.pt` (le réseau), `ckpt.pt` (optimiseur et curriculum, 
 Le dépôt contient ce qu'il faut pour générer le dataset sans rien réentraîner :
 - `models/neat.pkl` : le meilleur génome NEAT (2 salles seul), pour comparer avec `make compare`.
 - `models/ppo.pt` : le joueur PPO (CNN écran + LSTM), meilleur score solo 15 (9 à 13 salles en 10 min depuis Horon). Il vient de `runs/ppo/model-best.pt`.
+- `models/ppo-kills.pt` : le même réseau entraîné 15,8 M pas de plus avec une récompense par ennemi tué. Il explore un peu moins (10 à 13) mais se bat plus (1,8 kill par partie contre 0,6).
 - `spawns/` : 1 054 points de départ (states PyBoy compressés), au plus 8 par salle, sur 134 salles, tirés de l'archive Go-Explore `runs/horon/archive`.
 - `states/horon-endgame.state` : Horon avec l'inventaire de fin de jeu.
 
@@ -209,17 +210,17 @@ Installation, puis lancement :
 | `DATASET` | `/mnt/data/datasets/zelda` | dossier de sortie |
 | `DATASET_GB` | 50 | arrêt quand le dossier atteint cette taille |
 | `DATASET_WORKERS` | cœurs libres | un émulateur par worker ; par défaut nproc moins la charge du moment |
-| `DATASET_MODEL` | `models/ppo.pt` | joueur ; vide = tout au hasard |
+| `DATASET_MODEL` | `models/ppo.pt models/ppo-kills.pt` | joueurs, à parts égales ; vide = tout au hasard |
 | `DATASET_MODEL_FRAC` | 0.7 | part des parties jouées par le modèle, le reste au hasard |
 | `DATASET_ARCHIVE` | `spawns` | cellules de départ |
 
-Chaque partie dure 2 min de jeu (`--seconds` de `dataset.py`) et part d'une cellule de `spawns/` tirée au hasard, ou de Horon une fois sur 10 (`--horon`). Elle est jouée par le modèle (échantillonné, graine différente à chaque partie) 7 fois sur 10, et sinon par des actions aléatoires collantes : le modèle donne des trajectoires qui vont quelque part, le hasard couvre les actions que le modèle ne prend jamais (coups dans le vide, marche contre les murs). La partie s'arrête plus tôt si Link meurt. Une config `config-<graine>.json` est écrite à chaque lancement, on peut en lancer plusieurs sur le même dossier.
+Chaque partie dure 2 min de jeu (`--seconds` de `dataset.py`) et part d'une cellule de `spawns/` tirée au hasard, ou de Horon une fois sur 10 (`--horon`). Elle est jouée par un modèle 7 fois sur 10 (moitié `ppo`, moitié `ppo-kills`, échantillonné, graine différente à chaque partie), et sinon par des actions aléatoires collantes : le modèle donne des trajectoires qui vont quelque part, le hasard couvre les actions que le modèle ne prend jamais (coups dans le vide, marche contre les murs). La partie s'arrête plus tôt si Link meurt. Une config `config-<graine>.json` est écrite à chaque lancement, on peut en lancer plusieurs sur le même dossier.
 
 Un fichier par partie, `ep-<graine>-<worker>-<n>.npz` :
 - `frames` (N, 144, 160, 3) uint8 RGB, l'écran après chaque action ;
 - `actions` (N,) uint8, bits haut, bas, gauche, droite, A, B, tenus 4 frames ;
 - `first` l'écran avant la première action ;
-- `start` la cellule de départ, `policy` (`ppo` ou `random`).
+- `start` la cellule de départ, `policy` (`ppo`, `ppo-kills` ou `random`).
 
 Environ 3,4 Ko par frame compressée : 50 Go font à peu près 14 millions de frames, soit 270 h de jeu à 15 actions par seconde.
 

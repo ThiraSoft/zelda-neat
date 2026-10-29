@@ -2,14 +2,16 @@
 
 Chaque worker enchaîne des parties qui partent d'une cellule tirée au hasard (au plus 8 par salle,
 pour que chaque salle pèse à peu près autant) dans l'archive (ou de Horon), jouées par le modèle PPO (échantillonné, graine différente à chaque partie) ou par des
-actions aléatoires collantes. Une partie est continue du début à la fin, les clips d'entraînement
+actions aléatoires collantes. Avec plusieurs modèles, chaque partie jouée par un modèle le tire
+au hasard parmi eux, à parts égales. Une partie est continue du début à la fin, les clips d'entraînement
 se prennent à l'intérieur.
 
-    dataset.py --archive spawns --out /mnt/data/datasets/zelda --max-gb 50 --model models/ppo.pt
+    dataset.py --archive spawns --out /mnt/data/datasets/zelda --max-gb 50 --model models/ppo.pt models/ppo-kills.pt
 
 Fichier ep-<graine>-<worker>-<n>.npz : frames (N, 144, 160, 3) uint8 en RGB, écran après l'action,
 actions (N,) uint8 (bits haut, bas, gauche, droite, A, B tenus FRAMES_PER_ACTION frames),
-first (144, 160, 3) l'écran avant la première action, plus start (cellule ou "horon") et policy.
+first (144, 160, 3) l'écran avant la première action, plus start (cellule ou "horon") et policy
+(nom du modèle sans extension, ou "random").
 """
 import argparse
 import glob
@@ -43,12 +45,12 @@ def worker(i, args):
     from zneat.env import ZeldaEnv, to_mask
     from zneat.runner import FRAMES_PER_ACTION, random_policy
 
-    model = None
+    models = {}
     if args.model:
         import torch
         torch.set_num_threads(1)
         from zneat.ppo_model import load_model, torch_policy
-        model = load_model(args.model)
+        models = {os.path.splitext(os.path.basename(m))[0]: load_model(m) for m in args.model}
     rng = random.Random(args.seed * 1000 + i)
     env = ZeldaEnv(args.rom)
     steps = int(args.seconds * 60 / FRAMES_PER_ACTION)
@@ -61,9 +63,12 @@ def worker(i, args):
             start = rng.choice(cells)
         else:
             start = args.start
-        use_model = model is not None and rng.random() < args.model_frac
-        policy = (torch_policy(model, seed=rng.getrandbits(31)) if use_model
-                  else random_policy(random.Random(rng.getrandbits(32))))
+        if models and rng.random() < args.model_frac:
+            name = rng.choice(sorted(models))
+            policy = torch_policy(models[name], seed=rng.getrandbits(31))
+        else:
+            name = "random"
+            policy = random_policy(random.Random(rng.getrandbits(32)))
         env.load(read_state(start))
         env.step(set(), 1, True)
         first = env.pb.screen.ndarray[:, :, :3].copy()
@@ -80,10 +85,10 @@ def worker(i, args):
                 break
         else:
             k = steps
-        name = os.path.join(args.out, f"ep-{args.seed}-{i:02d}-{n:06d}.npz")
-        np.savez_compressed(name + ".tmp.npz", frames=frames[:k], actions=actions[:k], first=first,
-                            start=os.path.basename(start), policy="ppo" if use_model else "random")
-        os.replace(name + ".tmp.npz", name)
+        out = os.path.join(args.out, f"ep-{args.seed}-{i:02d}-{n:06d}.npz")
+        np.savez_compressed(out + ".tmp.npz", frames=frames[:k], actions=actions[:k], first=first,
+                            start=os.path.basename(start), policy=name)
+        os.replace(out + ".tmp.npz", out)
         n += 1
 
 
@@ -94,7 +99,8 @@ def main():
     ap.add_argument("--archive", default="spawns", help="dossier de cellules *.state.z où partir")
     ap.add_argument("--cells-per-room", type=int, default=8)
     ap.add_argument("--out", default="/mnt/data/datasets/zelda")
-    ap.add_argument("--model", default="models/ppo.pt", help="modèle PPO (sans : actions aléatoires seulement)")
+    ap.add_argument("--model", nargs="*", default=["models/ppo.pt", "models/ppo-kills.pt"],
+                    help="modèles PPO, tirés à parts égales (aucun : actions aléatoires seulement)")
     ap.add_argument("--model-frac", type=float, default=0.7, help="part des parties jouées par le modèle")
     ap.add_argument("--horon", type=float, default=0.1, help="part des parties qui partent de Horon")
     ap.add_argument("--seconds", type=float, default=120, help="durée d'une partie")
