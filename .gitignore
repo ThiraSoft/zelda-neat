@@ -1,0 +1,6 @@
+.venv/
+rom/
+runs/
+__pycache__/
+dist/
+*.tmp.npz

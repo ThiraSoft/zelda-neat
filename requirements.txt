@@ -1,0 +1,7 @@
+# Python 3.12 (PyBoy n'a pas de wheel pour 3.13+ au moment de l'écriture)
+neat-python==2.0.0
+numpy==2.5.4
+pillow==13.0.0
+pyboy==2.8.1
+pysdl2==0.9.17
+pysdl2-dll==2.32.10
