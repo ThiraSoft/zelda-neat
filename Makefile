@@ -17,6 +17,9 @@ ARGS ?=
 SOLO_SECONDS ?= 600
 SOLO_EVERY ?= 5
 GENOME ?= models/neat.pkl
+# RANDOM_LOCATION=1 : replay, compare, ppo-replay et ppo-solo partent d'une cellule de DATASET_ARCHIVE
+# tirée au hasard (la même pour les deux joueurs de make compare)
+RANDOM_LOCATION ?=
 # make compare : durée des deux parties en fenêtre (secondes de jeu, vitesse réelle)
 COMPARE_SECONDS ?= 120
 
@@ -55,6 +58,12 @@ PY = .venv/bin/python
 UNIT = zelda-explore
 PPO_UNIT = zelda-ppo
 DATASET_UNIT = zelda-dataset
+# Départ des parties regardées : Horon, ou une cellule au hasard tirée une seule fois par make.
+ifneq ($(strip $(RANDOM_LOCATION)),)
+START := $(shell $(PPO_PY) -c "import random, sys; sys.path.insert(0, '.'); from dataset import room_capped; print(random.choice(room_capped('$(DATASET_ARCHIVE)', 8)))")
+else
+START = $(firstword $(wildcard $(STATES)))
+endif
 MAKE_DATASET = $(PPO_PY) dataset.py --archive $(DATASET_ARCHIVE) --out $(DATASET) --max-gb $(DATASET_GB) \
 	--workers $(DATASET_WORKERS) --start $(firstword $(wildcard $(STATES))) \
 	--model "$(DATASET_MODEL)" --model-frac $(DATASET_MODEL_FRAC)
@@ -87,6 +96,7 @@ help:
 	@echo "make log          suit la progression"
 	@echo "make replay       regarde GENOME (défaut models/neat.pkl) jouer depuis Horon (fenêtre)"
 	@echo "make compare      NEAT (GENOME) et PPO (MODEL) jouent en même temps depuis Horon, deux fenêtres"
+	@echo "                  RANDOM_LOCATION=1 : départ dans une cellule au hasard (replay, compare, ppo-replay, ppo-solo)"
 	@echo "make reset        efface RUN (demande CONFIRM=oui)"
 	@echo "make package      archive du projet + RUN dans dist/"
 	@echo "make vault        package + envoi dans le Televault"
@@ -105,7 +115,7 @@ help:
 	@echo "make dataset      enregistre des parties (écran + boutons) dans DATASET jusqu'à DATASET_GB Go"
 	@echo "make dataset-start / dataset-stop   pareil en tâche de fond"
 	@echo "variables : WORKERS RANDOM_TRIALS RUN STATES MAX_SECONDS PATIENCE RANDOM_SECONDS GENERATIONS ARGS"
-	@echo "            SOLO_SECONDS SOLO_EVERY GENOME COMPARE_SECONDS"
+	@echo "            SOLO_SECONDS SOLO_EVERY GENOME COMPARE_SECONDS RANDOM_LOCATION"
 	@echo "            PPO_RUN ARCHIVE PPO_WORKERS ENVS DEMOS HORON SOLO_MINUTES BC_COEF BC_BURST PPO_ARGS MODEL PPO_PY\n            DATASET DATASET_GB DATASET_WORKERS DATASET_MODEL DATASET_MODEL_FRAC DATASET_ARCHIVE"
 
 install:
@@ -162,11 +172,11 @@ log:
 	tail -f $(RUN)/train.log | grep --line-buffered -E "^tour|Running generation|archive :|kills|Generation time|plateau|solo|Traceback"
 
 replay:
-	$(PPO_PY) solo.py --genome $(GENOME) --state $(firstword $(wildcard $(STATES))) --seconds $(COMPARE_SECONDS) --window
+	$(PPO_PY) solo.py --genome $(GENOME) --state $(START) --seconds $(COMPARE_SECONDS) --window
 
 compare:
-	$(PPO_PY) solo.py --genome $(GENOME) --state $(firstword $(wildcard $(STATES))) --seconds $(COMPARE_SECONDS) --window & \
-	$(PPO_PY) solo.py --model $(MODEL) --state $(firstword $(wildcard $(STATES))) --seconds $(COMPARE_SECONDS) --window & \
+	$(PPO_PY) solo.py --genome $(GENOME) --state $(START) --seconds $(COMPARE_SECONDS) --window & \
+	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(COMPARE_SECONDS) --window & \
 	wait
 
 reset:
@@ -225,11 +235,11 @@ ppo-log:
 	tail -f $(PPO_RUN)/train.log | grep --line-buffered -v -E "amdgpu.ids|SDL2"
 
 ppo-solo:
-	$(PPO_PY) solo.py --model $(MODEL) --state $(firstword $(wildcard $(STATES))) --seconds $(SOLO_SECONDS)
-	$(PPO_PY) solo.py --model $(MODEL) --state $(firstword $(wildcard $(STATES))) --seconds $(SOLO_SECONDS) --greedy
+	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS)
+	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS) --greedy
 
 ppo-replay:
-	$(PPO_PY) solo.py --model $(MODEL) --state $(firstword $(wildcard $(STATES))) --seconds $(SOLO_SECONDS) --window
+	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS) --window
 
 ppo-reset:
 	@[ "$(CONFIRM)" = oui ] || { echo "efface $(PPO_RUN) : relance avec make ppo-reset CONFIRM=oui"; exit 1; }

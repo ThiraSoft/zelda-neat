@@ -34,6 +34,7 @@ Toutes les commandes passent par `make` (`make help` les liste) :
     make log                     # suit la progression
     make replay                  # le meilleur génome NEAT (models/neat.pkl) joue depuis Horon, en fenêtre
     make compare                 # NEAT et PPO jouent en même temps depuis Horon, deux fenêtres (COMPARE_SECONDS=120)
+    make ppo-replay RANDOM_LOCATION=1   # départ dans une cellule de spawns/ au hasard (aussi replay, compare, ppo-solo)
     make reset CONFIRM=oui       # efface le run, le prochain start repart de zéro
     make package                 # archive code + ROM + states + run dans dist/ (la ROM n'est jamais dans git)
     make vault                   # package puis envoi dans le Televault

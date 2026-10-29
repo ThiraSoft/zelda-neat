@@ -3,8 +3,10 @@ Score = salles (groupe, salle) visitées + types d'ennemis tués.
 
     solo.py --genome runs/horon/best.pkl
     solo.py --model runs/ppo/model.pt [--greedy] [--window]
+    solo.py --model models/ppo.pt --random-location [spawns]   # départ dans une cellule au hasard
 """
 import argparse
+import random
 
 from zneat.archive import read_state
 from zneat.env import ZeldaEnv
@@ -20,7 +22,13 @@ ap.add_argument("--greedy", action="store_true", help="PPO : action la plus prob
 ap.add_argument("--seed", type=int, default=0, help="PPO : graine de l'échantillonnage")
 ap.add_argument("--seconds", type=float, default=600)
 ap.add_argument("--window", action="store_true", help="affiche le jeu (vitesse réelle)")
+ap.add_argument("--random-location", nargs="?", const="spawns", metavar="DOSSIER",
+                help="part d'une cellule tirée au hasard dans DOSSIER (défaut spawns), comme dataset.py")
 args = ap.parse_args()
+if args.random_location:
+    from dataset import room_capped
+    args.state = random.choice(room_capped(args.random_location, 8))
+    print("départ :", args.state, flush=True)
 
 # La fenêtre SDL s'ouvre avant de charger torch : dans l'autre ordre, elle reste noire (ROCm).
 env = ZeldaEnv(args.rom, window="SDL2" if args.window else "null", speed=1 if args.window else 0)
