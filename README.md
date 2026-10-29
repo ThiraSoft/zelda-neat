@@ -202,13 +202,13 @@ Installation, puis lancement :
 
 `make dataset` fait la même chose au premier plan. Les réglages se passent en variables :
 
-    make dataset-start DATASET=/chemin/zelda DATASET_GB=50 DATASET_WORKERS=20
+    make dataset-start DATASET=/chemin/zelda DATASET_GB=50 DATASET_WORKERS=10
 
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `DATASET` | `/mnt/data/datasets/zelda` | dossier de sortie |
 | `DATASET_GB` | 50 | arrêt quand le dossier atteint cette taille |
-| `DATASET_WORKERS` | 2 | un émulateur par worker, un par cœur libre |
+| `DATASET_WORKERS` | cœurs libres | un émulateur par worker ; par défaut nproc moins la charge du moment |
 | `DATASET_MODEL` | `models/ppo.pt` | joueur ; vide = tout au hasard |
 | `DATASET_MODEL_FRAC` | 0.7 | part des parties jouées par le modèle, le reste au hasard |
 | `DATASET_ARCHIVE` | `spawns` | cellules de départ |

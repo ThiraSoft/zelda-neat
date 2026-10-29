@@ -41,7 +41,8 @@ CHECK ?= 20
 # dataset world model
 DATASET ?= /mnt/data/datasets/zelda
 DATASET_GB ?= 50
-DATASET_WORKERS ?= 2
+# cœurs libres au lancement : nproc moins la charge moyenne sur 1 min, au moins 1
+DATASET_WORKERS ?= $(shell awk -v n=$$(nproc) '{w = n - int($$1 + 0.5); print (w < 1 ? 1 : w)}' /proc/loadavg)
 DATASET_MODEL ?= models/ppo.pt
 # part des parties jouées par le modèle, le reste au hasard
 DATASET_MODEL_FRAC ?= 0.7
