@@ -22,6 +22,9 @@ ap.add_argument("--seconds", type=float, default=600)
 ap.add_argument("--window", action="store_true", help="affiche le jeu (vitesse réelle)")
 args = ap.parse_args()
 
+# La fenêtre SDL s'ouvre avant de charger torch : dans l'autre ordre, elle reste noire (ROCm).
+env = ZeldaEnv(args.rom, window="SDL2" if args.window else "null", speed=1 if args.window else 0)
+
 if args.model:
     from zneat.ppo_model import load_model, torch_policy
     policy = torch_policy(load_model(args.model), args.greedy, args.seed)
@@ -37,7 +40,6 @@ elif args.genome:
 else:
     raise SystemExit("--genome ou --model")
 
-env = ZeldaEnv(args.rom, window="SDL2" if args.window else "null", speed=1 if args.window else 0)
 # Le modèle PPO regarde l'écran : il faut le rendre à chaque pas.
 t = solo(env, policy, read_state(args.state), args.seconds, render=args.window or bool(args.model))
 print("solo :", solo_line(t))

@@ -60,6 +60,7 @@ class ZeldaEnv:
         self.pb.set_emulation_speed(speed)
         self.mem = Ram(self.pb.memory)
         self.held = set()
+        self.window = sound
 
     def load(self, state):
         # On relâche tout, pas seulement self.held : l'état des touches après un chargement
@@ -80,6 +81,12 @@ class ZeldaEnv:
         for b in wanted - self.held:
             self.pb.button_press(b)
         self.held = set(wanted)
+        if self.window:
+            # Avec une fenêtre, tick(n) n'affiche que la dernière frame et ne limite la vitesse
+            # qu'une fois : écran noir et jeu n fois trop rapide. On avance frame par frame.
+            for _ in range(frames):
+                alive = self.pb.tick(1, True)
+            return alive
         return self.pb.tick(frames, render)
 
     def frame(self):
