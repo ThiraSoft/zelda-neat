@@ -27,6 +27,8 @@ Toutes les commandes passent par `make` (`make help` les liste) :
     make bench                   # mesure le bon nombre de workers
     make start                   # explore par parties aléatoires en tâche de fond (Go-Explore, remplit l'archive)
     make neat                    # ancien entraînement NEAT, au premier plan
+    make neat-spawns-start       # NEAT en score solo, départs au hasard dans spawns/ (run runs/neat-spawns)
+    make neat-spawns-stop / neat-spawns-log
     make start-tmux              # pareil dans une session tmux "neat", sans systemd
     make run                     # pareil au premier plan, Ctrl+C sauve un checkpoint
     make stop                    # arrêt propre avec checkpoint (systemd ou tmux)
@@ -181,6 +183,15 @@ Dans `PPO_RUN/` : `model.pt` (le réseau), `ckpt.pt` (optimiseur et curriculum, 
 ## Exploration sans NEAT
 
 `make start` lance `explore.py` : Go-Explore par parties aléatoires seulement. À chaque tour, 50 cellules par worker sont tirées dans l'archive et une partie aux actions aléatoires collantes part de chacune. C'est bien plus rapide que NEAT pour trouver des salles (1 500 cellules en 90 s sur 8 cœurs). NEAT reste disponible avec `make neat`.
+
+## NEAT en score solo
+
+`make neat-spawns-start` lance `train.py --spawns spawns` dans `runs/neat-spawns`. À chaque génération, `NEAT_STARTS` cellules (5) sont tirées au hasard dans `spawns/`, et tous les génomes jouent seuls depuis ces mêmes départs, 2 min au plus, arrêt après 15 s sans rien de nouveau. La fitness ne compte que ce que le génome a fait lui-même : 100 par salle, 100 par type d'ennemi tué, 100 par flag d'histoire, 10 par salle déjà vue dans une autre saison, -20 s'il meurt. Il n'y a ni archive commune, ni bonus de nouveauté, ni parties aléatoires.
+
+Toutes les 5 générations, le meilleur génome joue 10 min seul depuis Horon (ligne `solo :`). Le meilleur à ce test est gardé dans `runs/neat-spawns/best-solo.pkl` (score dans `solo-best.json`). Pour le comparer au PPO :
+
+    make compare GENOME=runs/neat-spawns/best-solo.pkl
+    make compare GENOME=runs/neat-spawns/best-solo.pkl RANDOM_LOCATION=1
 
 ## Dataset world model
 

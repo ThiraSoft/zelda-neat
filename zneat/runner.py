@@ -140,7 +140,8 @@ def job(args):
         t = solo(_env, net_policy(make_net(genome, config)), read_state(path), seconds)
         t.captured = None
         return t
-    known = known_cells(known_path)
+    # Sans archive (départs au hasard, score solo) : rien n'est capturé, pas de bonus de nouveauté.
+    known = known_cells(known_path) if known_path else None
     captured = {}
     if kind == "neat":
         genome, config, starts = args[2:]

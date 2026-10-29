@@ -12,7 +12,7 @@ import neat
 
 from zneat.archive import Archive, cell_key, key_str, read_state
 from zneat.env import NUM_INPUTS, ZeldaEnv
-from zneat.runner import indexed_job, init_worker, job as run_job, solo_line
+from zneat.runner import indexed_job, init_worker, job as run_job, solo_line, solo_score
 
 KEEP_CHECKPOINTS = 5
 RESTART_FRESH = 0.3      # part de génomes neufs après un plateau
@@ -34,8 +34,9 @@ class Explorer:
     pendant que les dernières parties NEAT finissent."""
 
     def __init__(self, pool, archive, run, starts, random_trials, random_frames,
-                 solo_state=None, solo_every=5, solo_seconds=600):
+                 solo_state=None, solo_every=5, solo_seconds=600, spawns=None):
         self.pool = pool
+        self.spawns = spawns
         self.solo_state = solo_state
         self.solo_every = solo_every
         self.solo_seconds = solo_seconds
@@ -55,6 +56,8 @@ class Explorer:
             self.kills = json.load(open(self.kills_path))
 
     def evaluate(self, genomes, config):
+        if self.spawns:
+            return self.evaluate_spawns(genomes, config)
         kp = self.archive.known_path
         starts = [(k, self.archive.path(k)) for k in self.archive.choose(self.starts, self.rng)]
         jobs = [("neat", kp, g, config, starts) for _, g in genomes]
@@ -90,18 +93,51 @@ class Explorer:
         self.generation += 1
         return found["neat"]
 
+    def evaluate_spawns(self, genomes, config):
+        """Score solo : chaque génome joue seul depuis les mêmes départs, tirés au hasard dans les
+        spawns à chaque génération. Fitness = ce qu'il a fait lui-même (salles, types d'ennemis
+        tués, histoire, mort), sans archive ni parties aléatoires."""
+        starts = [(None, p) for p in self.rng.sample(self.spawns, self.starts)]
+        jobs = [("neat", None, g, config, starts) for _, g in genomes]
+        kills, kinds = 0, set(self.kills["kinds"])
+        for i, (fit, _, k, killed) in self.pool.imap_unordered(indexed_job, enumerate(jobs)):
+            genomes[i][1].fitness = fit
+            kills += k
+            kinds |= killed
+        self.kills["neat"] += kills
+        self.kills["kinds"] = sorted(kinds)
+        json.dump(self.kills, open(self.kills_path, "w"))
+        best = max((g for _, g in genomes), key=lambda g: g.fitness)
+        with open(os.path.join(self.run, "best.pkl"), "wb") as f:
+            pickle.dump(best, f)
+        print(f"départs : {', '.join(os.path.basename(p) for _, p in starts)} | "
+              f"fitness max {best.fitness:.0f} | kills {kills}, {len(kinds)} types au total")
+        self.solo(genomes, config)
+        self.generation += 1
+        return 0
+
     def solo(self, genomes, config):
         """Toutes les solo_every générations, le meilleur génome joue seul depuis le départ,
         en tâche de fond dans le pool. Le résultat est affiché à la génération où il arrive."""
         if self.solo_pending and self.solo_pending[0].ready():
-            res, gen, fit = self.solo_pending
-            print(f"solo : {solo_line(res.get())} (génome de la génération {gen}, fitness {fit:.0f})")
+            res, gen, fit, genome = self.solo_pending
+            t = res.get()
+            score, best_path = solo_score(t), os.path.join(self.run, "solo-best.json")
+            best = json.load(open(best_path))["score"] if os.path.exists(best_path) else -1
+            mark = ""
+            if score > best:
+                with open(os.path.join(self.run, "best-solo.pkl"), "wb") as f:
+                    pickle.dump(genome, f)
+                json.dump({"score": score, "generation": gen}, open(best_path, "w"))
+                mark = ", nouveau meilleur"
+            print(f"solo : {solo_line(t)} (génome de la génération {gen}, fitness {fit:.0f}{mark})")
             self.solo_pending = None
         if (self.solo_state and self.solo_every and not self.solo_pending
                 and self.generation % self.solo_every == 0):
             best = max((g for _, g in genomes), key=lambda g: g.fitness)
             args = ("solo", None, best, config, self.solo_state, self.solo_seconds)
-            self.solo_pending = (self.pool.apply_async(run_job, (args,)), self.generation, best.fitness)
+            self.solo_pending = (self.pool.apply_async(run_job, (args,)), self.generation, best.fitness,
+                                 copy.deepcopy(best))
 
     def save_discoverer(self, genome, key):
         name = f"gen{self.generation:05d}-{key_str(key)}.pkl"
@@ -170,6 +206,9 @@ def main():
     ap.add_argument("--solo-every", type=int, default=5,
                     help="le meilleur génome joue seul depuis le premier state toutes les N générations (0 = jamais)")
     ap.add_argument("--solo-seconds", type=float, default=600, help="durée de la partie solo")
+    ap.add_argument("--spawns", default=None,
+                    help="dossier de cellules : départs tirés au hasard à chaque génération (8 par salle "
+                         "au plus) et score solo, sans archive ni parties aléatoires")
     ap.add_argument("--resume", nargs="?", const="latest",
                     help="checkpoint à reprendre (sans valeur : le plus récent du run)")
     args = ap.parse_args()
@@ -211,8 +250,15 @@ def main():
     pool = Pool(args.workers, initializer=init_worker,
                 initargs=(args.rom, (), args.max_seconds, args.patience))
     solo_state = (sorted(glob.glob(args.states)) or [None])[0]
+    spawns = None
+    if args.spawns:
+        from dataset import room_capped
+        spawns = room_capped(args.spawns, 8)
+        args.plateau = 0   # pas de salle nouvelle à attendre en score solo
+        print(f"départs au hasard dans {len(spawns)} cellules de {args.spawns}, score solo")
     explorer = Explorer(pool, archive, args.run, args.starts, args.random_trials,
-                        int(args.random_seconds * 60), solo_state, args.solo_every, args.solo_seconds)
+                        int(args.random_seconds * 60), solo_state, args.solo_every, args.solo_seconds,
+                        spawns)
     explorer.generation = pop.generation
     try:
         last_gen, done = pop.generation, 0
