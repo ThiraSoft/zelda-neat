@@ -18,7 +18,7 @@ from .runner import FRAMES_PER_ACTION, busy
 
 W_ROOM = 2.0      # salle (groupe, salle) jamais vue pendant l'épisode (hausse pour motiver l'exploration)
 W_VARIANT = 0.1   # même salle dans une autre saison : peu, sinon changer de saison sur place rapporte
-W_KIND = 1.0      # type d'ennemi tué pour la première fois de l'épisode
+W_KIND = 2.5      # type d'ennemi tué pour la première fois de l'épisode (boosté de 1.0 à 2.5 pour inciter à combattre)
 W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
 KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
 W_STORY = 1.0     # bit d'histoire gagné
