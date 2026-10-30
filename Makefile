@@ -33,9 +33,9 @@ DEMOS ?= 4
 HORON ?= 0.2
 SOLO_MINUTES ?= 15
 PPO_ARGS ?=
-# imitation des démos : poids dans la perte PPO, pas à chaque nouvelle démo
-BC_COEF ?= 0.2
-BC_BURST ?= 300
+# imitation des démos : poids dans la perte PPO, pas à chaque nouvelle démo (0 = PPO pur sur le curriculum)
+BC_COEF ?= 0.0
+BC_BURST ?= 0
 MODEL ?= models/ppo.pt
 CHECK ?= 20
 # dataset world model
