@@ -24,8 +24,8 @@ KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le fa
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.01     # case visitée (réduit de 0.05 à 0.01 pour éviter le piétinement en boucle)
 W_BACKTRACK = -0.5  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
-W_LOCAL_STAGNATION = -0.01  # pénalité si Link tourne en rond sur place (< 32 px sur 20 pas = 4s)
-W_ROOM_STAGNATION = -0.005   # pénalité si Link traîne > 50 pas (10s) dans la même salle sans progrès
+W_LOCAL_STAGNATION = -0.02  # pénalité si Link tourne en rond sur place (< 32 px sur 15 pas = 3s)
+W_ROOM_STAGNATION = -0.01   # pénalité si Link traîne > 35 pas (7s) dans la même salle sans progrès
 W_SPAM = -0.005     # micro-pénalité si appui répété A/B pendant le cooldown (anti-spam bouclier/épée)
 COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max ~1.7/s)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
@@ -137,7 +137,7 @@ class Episode:
         self.prev_room = None
         self.room_transition_step = 0
         self.room_steps = 0
-        self.pos_history = deque(maxlen=20)
+        self.pos_history = deque(maxlen=15)
         self.held_a = False
         self.held_b = False
         self.cooldown_a = 0
@@ -225,17 +225,17 @@ class Episode:
         r += W_VARIANT * (len(t.rooms) - n_variants) + W_TILE * (len(t.tiles) - n_tiles)
         r += W_STORY * (t.story - story)
 
-        # Pénalité de stagnation locale (tourner en rond sur place < 32 px sur 20 pas = 4s)
+        # Pénalité de stagnation locale (tourner en rond sur place < 32 px sur 15 pas = 3s)
         pos = (m[ram.LINK + ram.OBJ_YH], m[ram.LINK + ram.OBJ_XH])
         self.pos_history.append(pos)
-        if len(self.pos_history) == 20 and not busy(m):
+        if len(self.pos_history) == 15 and not busy(m):
             span = max(max(p[0] for p in self.pos_history) - min(p[0] for p in self.pos_history),
                        max(p[1] for p in self.pos_history) - min(p[1] for p in self.pos_history))
             if span < 32:
                 r += W_LOCAL_STAGNATION
 
-        # Pénalité de stagnation en salle (> 50 pas = 10s dans la même pièce sans progrès)
-        if self.room_steps > 50 and not busy(m) and not (new or paid > 0):
+        # Pénalité de stagnation en salle (> 35 pas = 7s dans la même pièce sans progrès)
+        if self.room_steps > 35 and not busy(m) and not (new or paid > 0):
             r += W_ROOM_STAGNATION
 
         # Dégâts subis (par quart de coeur)
