@@ -111,9 +111,11 @@ class ZeldaEnv:
         return self.pb.tick(frames, render)
 
     def frame(self):
-        """Écran rendu au dernier tick, réduit de moitié en niveaux de gris : 72x80 uint8."""
-        s = self.pb.screen.ndarray[::2, ::2, :3].astype(np.uint16)
-        return ((s @ LUMA) >> 8).astype(np.uint8)
+        """Écran rendu au dernier tick, moyenne 2x2 en niveaux de gris : 72x80 uint8."""
+        s = self.pb.screen.ndarray
+        rgb = (s[0::2, 0::2, :3].astype(np.uint16) + s[0::2, 1::2, :3] +
+               s[1::2, 0::2, :3] + s[1::2, 1::2, :3]) >> 2
+        return ((rgb @ LUMA) >> 8).astype(np.uint8)
 
     def observe(self):
         m = self.mem
