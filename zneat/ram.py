@@ -5,6 +5,7 @@ ACTIVE_GROUP = 0xCC49     # 0 overworld, 1 Subrosia, 4/5 donjons...
 ACTIVE_ROOM = 0xCC4C
 SEASON = 0xCC4E           # wRoomStateModifier : 0 printemps, 1 été, 2 automne, 3 hiver
 TEXT_ACTIVE = 0xCBA0      # vérifié sur la ROM EU : 1 pendant un dialogue
+OPENED_MENU = 0xCBCB      # wOpenedMenuType : 0 en jeu, 1 inventaire, 2 carte...
 DISABLED_OBJECTS = 0xCCA4 # bit 0 ou 7 : Link bloqué (cinématique), non vérifié sur la ROM EU
 
 LINK_HEALTH = 0xC6A2      # en quarts de coeur

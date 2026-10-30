@@ -24,6 +24,7 @@ KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le fa
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.05     # case visitée / interaction de décor (buissons, pots, etc.)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
+W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
 W_DAMAGE = -0.05  # par quart de coeur perdu (incite à esquiver/parer)
 W_DEATH = -1.0
 
@@ -124,6 +125,10 @@ class Episode:
         if new_items:
             self.equipped_items |= new_items
             r += W_EQUIP * len(new_items)
+
+        # Micro-pénalité continue si un menu est ouvert (l'incite à refermer vite)
+        if m[ram.OPENED_MENU]:
+            r += W_MENU
 
         if t.dead:
             r += W_DEATH
