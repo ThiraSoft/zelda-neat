@@ -1,11 +1,12 @@
 import io
+import os
 
 import numpy as np
 from pyboy import PyBoy
 
 from . import ram
 
-BUTTONS = ("up", "down", "left", "right", "a", "b")
+BUTTONS = ("up", "down", "left", "right", "a", "b", "start")
 
 
 def to_mask(buttons):
@@ -23,6 +24,11 @@ SCREEN = (72, 80)
 LUMA = np.array([77, 151, 28], dtype=np.uint16)
 
 SOUND_WAIT_JUMPS = (0x49D1, 0x49D2, 0x49EF, 0x49F0)
+
+# Objet forcé sur A à chaque chargement (variable ZELDA_A, make A_ITEM=...). Les states de l'archive
+# ont le Rod sur A ; "feather" y met la cape de Roc. Trésors : constants/common/treasure.s.
+ITEMS = {"rod": 0x07, "feather": 0x17}
+EQUIP_B, EQUIP_A, STORAGE = 0xC680, 0xC681, range(0xC682, 0xC692)
 
 
 def tile_value(c):
@@ -61,6 +67,7 @@ class ZeldaEnv:
         self.mem = Ram(self.pb.memory)
         self.held = set()
         self.window = sound
+        self.a_item = ITEMS[os.environ["ZELDA_A"]] if os.environ.get("ZELDA_A") else None
 
     def load(self, state):
         # On relâche tout, pas seulement self.held : l'état des touches après un chargement
@@ -69,6 +76,20 @@ class ZeldaEnv:
         for b in BUTTONS:
             self.pb.button_release(b)
         self.held = set()
+        if self.a_item is not None:
+            self.equip_a(self.a_item)
+
+    def equip_a(self, item):
+        """Met item sur A en l'échangeant avec ce qui y était (dans l'inventaire ou sur B)."""
+        m = self.pb.memory
+        old = m[EQUIP_A]
+        if old == item:
+            return
+        for a in (EQUIP_B, *STORAGE):
+            if m[a] == item:
+                m[a] = old
+                break
+        m[EQUIP_A] = item
 
     def save(self):
         f = io.BytesIO()

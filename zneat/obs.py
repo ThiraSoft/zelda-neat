@@ -7,19 +7,27 @@ from .env import NUM_INPUTS, to_mask
 
 DIRS = ("up", "down", "left", "right")
 ACTIONS = ([set()] + [{d} for d in DIRS] + [{"a"}, {"b"}]
-           + [{d, "b"} for d in DIRS] + [{d, "a"} for d in DIRS])
+           + [{d, "b"} for d in DIRS] + [{d, "a"} for d in DIRS]
+           + [{"start"}])
 
-PPO_INPUTS = NUM_INPUTS + 8 + 2 + 8 + 2 + 4
+# Périodes pour l'encodage temporel sinusoïdal (en pas d'action, 15 pas ≈ 1s) :
+# 15 pas (1s : rythme de frappe/esquive), 60 pas (4s : cycle d'attaques des ennemis/invincibilité),
+# 300 pas (20s : moyen terme), 1500 pas (100s : échelle de l'épisode).
+TIME_PERIODS = (15, 60, 300, 1500)
+TIME_INPUTS = 2 * len(TIME_PERIODS)   # sin et cos pour chaque période (8 valeurs)
+PPO_INPUTS = NUM_INPUTS + 8 + 2 + 8 + 2 + 4 + TIME_INPUTS
 
 
 class Observer:
     """Observation du PPO : celle de NEAT (env.observe) plus de quoi savoir où on est.
     Groupe (one-hot 8), salle en coordonnées (y, x sur la grille 16x16 du groupe) et en 8 bits,
-    position de Link dans la salle, et pour les 4 salles voisines : déjà vue pendant l'épisode ?
-    Un Observer par épisode, il retient les salles vues."""
+    position de Link dans la salle, pour les 4 salles voisines : déjà vue pendant l'épisode ?,
+    et encodage sinusoïdal temporel (sin et cos sur plusieurs échelles de temps).
+    Un Observer par épisode, il retient les salles vues et le pas courant."""
 
-    def __init__(self, visited=()):
+    def __init__(self, visited=(), step=0):
         self.visited = set(visited)
+        self.step = step
 
     def __call__(self, env):
         m = env.mem
@@ -36,6 +44,12 @@ class Observer:
             n = room + d
             if 0 <= n < 256 and (d in (-16, 16) or n >> 4 == room >> 4):
                 x[20 + i] = 1.0 if (group, n) in self.visited else 0.0
+        t = self.step
+        for i, p in enumerate(TIME_PERIODS):
+            w = 2.0 * np.pi * t / p
+            x[24 + 2 * i] = np.sin(w)
+            x[24 + 2 * i + 1] = np.cos(w)
+        self.step += 1
         return np.concatenate((env.observe(), x))
 
 

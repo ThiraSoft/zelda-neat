@@ -51,7 +51,7 @@ def main():
     ap.add_argument("--run", default="runs/ppo")
     ap.add_argument("--workers", type=int, default=max(1, os.cpu_count() - 1))
     ap.add_argument("--envs-per-worker", type=int, default=4)
-    ap.add_argument("--steps", type=int, default=128, help="pas par env entre deux mises à jour")
+    ap.add_argument("--steps", type=int, default=256, help="pas par env entre deux mises à jour")
     ap.add_argument("--epochs", type=int, default=4)
     ap.add_argument("--minibatches", type=int, default=4)
     ap.add_argument("--lr", type=float, default=2.5e-4)
@@ -60,7 +60,9 @@ def main():
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--ent", type=float, default=0.01)
     ap.add_argument("--vf", type=float, default=0.5)
-    ap.add_argument("--hidden", type=int, default=256)
+    ap.add_argument("--hidden", type=int, default=512)
+    ap.add_argument("--arch", choices=("nature", "impala"), default="impala",
+                    help="impala : CNN résiduel plus profond, fc 512")
     ap.add_argument("--max-seconds", type=float, default=600, help="durée max d'un épisode")
     ap.add_argument("--patience", type=float, default=30, help="fin d'épisode après N s sans rien de nouveau")
     ap.add_argument("--horon", type=float, default=0.2, help="part des épisodes qui partent de Horon")
@@ -105,12 +107,12 @@ def main():
     back = max(1, round(args.back_seconds * 60 / FRAMES_PER_ACTION / args.demo_every))
     curriculum = Curriculum(args.horon, back, args.success, args.window, jitter=min(2, back))
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Policy(hidden=args.hidden).to(device)
+    model = Policy(hidden=args.hidden, arch=args.arch).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)
     step = 0
     if args.resume and os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location=device, weights_only=False)
-        if ck.get("kind") != "cnn-lstm" or ck.get("n_vec") != PPO_INPUTS:
+        if ck.get("kind") != "cnn-lstm" or ck.get("n_vec") != PPO_INPUTS or ck.get("arch", "nature") != args.arch:
             raise SystemExit(f"{ckpt_path} : ancienne version du réseau, make ppo-reset CONFIRM=oui puis relancer")
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
@@ -186,7 +188,7 @@ def main():
     def save():
         save_model(model, model_path)
         torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step,
-                    "curriculum": curriculum.state(), "kind": "cnn-lstm", "n_vec": PPO_INPUTS},
+                    "curriculum": curriculum.state(), "kind": "cnn-lstm", "n_vec": PPO_INPUTS, "arch": args.arch},
                    ckpt_path + ".tmp")
         os.replace(ckpt_path + ".tmp", ckpt_path)
 

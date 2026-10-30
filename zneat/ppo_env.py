@@ -10,7 +10,7 @@ import numpy as np
 
 from . import ram
 from .archive import read_state
-from .env import ZeldaEnv
+from .env import ZeldaEnv, EQUIP_B, EQUIP_A
 from .fitness import Tracker
 from .obs import ACTIONS, Observer, observe
 from .paths import build_demo
@@ -22,7 +22,9 @@ W_KIND = 1.0      # type d'ennemi tué pour la première fois de l'épisode
 W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
 KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
 W_STORY = 1.0     # bit d'histoire gagné
-W_TILE = 0.0      # cases : pas une récompense, le but ce sont les salles (elles servent à la patience)
+W_TILE = 0.05     # case visitée / interaction de décor (buissons, pots, etc.)
+W_EQUIP = 0.2     # première fois qu'un objet est équipé pendant l'épisode (exploration du menu)
+W_DAMAGE = -0.05  # par quart de coeur perdu (incite à esquiver/parer)
 W_DEATH = -1.0
 
 
@@ -63,18 +65,23 @@ class Episode:
             self.target = ((end["rooms"] - here["rooms"])
                            + len(set(end["kinds"]) - prefill_kinds) + (end["story"] - here["story"]))
             horizon = min(self.max_steps, 2 * (pts[-1]["step"] - here["step"]) + 450)
+            step_start = here["step"]
         elif cells and r >= cur["horon"]:
             state = read_state(self.rng.choice(cells))
+            step_start = 0
         else:
             state = self.seed
+            step_start = 0
         self.env.load(state)
         self.env.step(set(), 1, True)   # une frame rendue pour la première observation
         self.t = Tracker(self.env.mem)
         self.prefill_rooms, self.prefill_kinds = prefill_rooms, prefill_kinds
         self.rooms = set(prefill_rooms)
-        self.observer = Observer(prefill_rooms)
+        self.observer = Observer(prefill_rooms, step=step_start)
         self.kinds = set(prefill_kinds)
         self.room_kills = {}
+        self.health = self.env.mem[ram.LINK_HEALTH]
+        self.equipped_items = {self.env.mem[EQUIP_B], self.env.mem[EQUIP_A]} - {0}
         self.horizon = horizon
         self.steps = self.idle = 0
         self.ret = 0.0
@@ -104,11 +111,25 @@ class Episode:
             r += W_KILL * paid
         r += W_VARIANT * (len(t.rooms) - n_variants) + W_TILE * (len(t.tiles) - n_tiles)
         r += W_STORY * (t.story - story)
+
+        # Dégâts subis (par quart de coeur)
+        hp = m[ram.LINK_HEALTH]
+        if hp < self.health:
+            r += W_DAMAGE * (self.health - hp)
+        self.health = hp
+
+        # Exploration de l'inventaire : récompense la première fois qu'un objet est équipé
+        cur_items = {m[EQUIP_B], m[EQUIP_A]} - {0}
+        new_items = cur_items - self.equipped_items
+        if new_items:
+            self.equipped_items |= new_items
+            r += W_EQUIP * len(new_items)
+
         if t.dead:
             r += W_DEATH
         self.steps += 1
         self.ret += r
-        if new or paid > 0:
+        if new or paid > 0 or new_items:
             self.idle = 0
         elif not busy(m):
             self.idle += 1

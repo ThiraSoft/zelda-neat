@@ -15,10 +15,13 @@ from .runner import solo, solo_line, solo_score
 
 
 class Conv(nn.Conv2d):
-    """Convolution sans padding par im2col + matmul. Sur ROCm (RX 9070), les convolutions MIOpen
+    """Convolution par im2col + matmul. Sur ROCm (RX 9070), les convolutions MIOpen
     sont 4 fois plus lentes que ce passage par rocBLAS. Mêmes poids que nn.Conv2d."""
 
     def forward(self, x):
+        p = self.padding[0]
+        if p:
+            x = nn.functional.pad(x, (p, p, p, p))
         B, _, H, W = x.shape
         k, s = self.kernel_size[0], self.stride[0]
         cols = nn.functional.unfold(x, k, stride=s)
@@ -26,18 +29,42 @@ class Conv(nn.Conv2d):
         return y.view(B, self.out_channels, (H - k) // s + 1, (W - k) // s + 1)
 
 
-class Policy(nn.Module):
-    def __init__(self, n_vec=PPO_INPUTS, n_act=len(ACTIONS), hidden=256):
+class Residual(nn.Module):
+    def __init__(self, c):
         super().__init__()
-        self.hidden, self.n_vec = hidden, n_vec
-        self.cnn = nn.Sequential(
-            Conv(1, 32, 8, 4), nn.ReLU(), Conv(32, 64, 4, 2), nn.ReLU(),
-            Conv(64, 64, 3, 1), nn.ReLU(), nn.Flatten())
+        self.body = nn.Sequential(nn.ReLU(), Conv(c, c, 3, 1, 1), nn.ReLU(), Conv(c, c, 3, 1, 1))
+
+    def forward(self, x):
+        return x + self.body(x)
+
+
+def impala_cnn(channels=(32, 64, 64)):
+    """CNN résiduel d'IMPALA, plus profond que celui de DQN : 3 étages conv + max pool + 2 blocs."""
+    layers, c_in = [], 1
+    for c in channels:
+        layers += [Conv(c_in, c, 3, 1, 1), nn.MaxPool2d(3, 2, 1), Residual(c), Residual(c)]
+        c_in = c
+    return nn.Sequential(*layers, nn.ReLU(), nn.Flatten())
+
+
+class Policy(nn.Module):
+    """arch "nature" : CNN de DQN, fc 256. arch "impala" : CNN résiduel, fc 512 (modèle plus gros)."""
+
+    def __init__(self, n_vec=PPO_INPUTS, n_act=len(ACTIONS), hidden=256, arch="nature"):
+        super().__init__()
+        self.hidden, self.n_vec, self.arch = hidden, n_vec, arch
+        if arch == "impala":
+            self.cnn, n_fc = impala_cnn(), 512
+        else:
+            self.cnn = nn.Sequential(
+                Conv(1, 32, 8, 4), nn.ReLU(), Conv(32, 64, 4, 2), nn.ReLU(),
+                Conv(64, 64, 3, 1), nn.ReLU(), nn.Flatten())
+            n_fc = 256
         with torch.no_grad():
             n_cnn = self.cnn(torch.zeros(1, 1, *SCREEN)).shape[1]
-        self.cnn_fc = nn.Sequential(nn.Linear(n_cnn, 256), nn.ReLU())
+        self.cnn_fc = nn.Sequential(nn.Linear(n_cnn, n_fc), nn.ReLU())
         self.vec = nn.Sequential(nn.Linear(n_vec, 128), nn.ReLU())
-        self.lstm = nn.LSTM(384, hidden)
+        self.lstm = nn.LSTM(n_fc + 128, hidden)
         self.pi = nn.Linear(hidden, n_act)
         self.v = nn.Linear(hidden, 1)
         nn.init.orthogonal_(self.pi.weight, 0.01)
@@ -68,15 +95,17 @@ class Policy(nn.Module):
 def save_model(model, path):
     tmp = path + ".tmp"
     torch.save({"model": model.state_dict(), "hidden": model.hidden, "n_vec": model.n_vec,
-                "kind": "cnn-lstm"}, tmp)
+                "kind": "cnn-lstm", "arch": model.arch}, tmp)
     os.replace(tmp, path)
 
 
 def load_model(path):
-    data = torch.load(path, map_location="cpu")
-    if data.get("kind") != "cnn-lstm" or data.get("n_vec") != PPO_INPUTS:
-        raise SystemExit(f"{path} : modèle d'une ancienne version, à réentraîner")
-    model = Policy(hidden=data["hidden"])
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    if data.get("kind") != "cnn-lstm":
+        raise SystemExit(f"{path} : modèle non reconnu")
+    n_vec = data.get("n_vec", PPO_INPUTS)
+    n_act = data["model"]["pi.weight"].shape[0] if "model" in data and "pi.weight" in data["model"] else len(ACTIONS)
+    model = Policy(n_vec=n_vec, n_act=n_act, hidden=data["hidden"], arch=data.get("arch", "nature"))
     model.load_state_dict(data["model"])
     return model.eval()
 
@@ -92,6 +121,11 @@ def torch_policy(model, greedy=False, seed=0):
     @torch.no_grad()
     def policy(env):
         f, v = observe(env, observer)
+        if len(v) != model.n_vec:
+            if len(v) > model.n_vec:
+                v = v[:model.n_vec]
+            else:
+                v = np.pad(v, (0, model.n_vec - len(v)))
         logits, _, state[0] = model(torch.from_numpy(f)[None, None], torch.from_numpy(v)[None, None],
                                     state[0], zero)
         logits = logits[0, 0]
