@@ -10,6 +10,7 @@ DISABLED_OBJECTS = 0xCCA4 # bit 0 ou 7 : Link bloqué (cinématique), non vérif
 
 LINK_HEALTH = 0xC6A2      # en quarts de coeur
 LINK_MAX_HEALTH = 0xC6A3
+RUPEES = 0xC6A5           # 2 octets en BCD (0xC6A5 et 0xC6A6, little-endian)
 
 # Octets dont les bits comptent comme progression d'histoire.
 TREASURE_FLAGS = (0xC692, 16)

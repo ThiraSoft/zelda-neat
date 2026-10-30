@@ -24,9 +24,15 @@ KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le fa
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.05     # case visitée / interaction de décor (buissons, pots, etc.)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
+W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
 W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
 W_DAMAGE = -0.05  # par quart de coeur perdu (incite à esquiver/parer)
 W_DEATH = -1.0
+
+
+def bcd_rupees(m):
+    return ((m[ram.RUPEES + 1] >> 4) * 1000 + (m[ram.RUPEES + 1] & 0xF) * 100
+            + (m[ram.RUPEES] >> 4) * 10 + (m[ram.RUPEES] & 0xF))
 
 
 class Episode:
@@ -107,8 +113,11 @@ class Episode:
         # Limite les coeurs à 4 (16 quarts) pour que la survie et la mort soient un réel enjeu
         self.env.pb.memory[ram.LINK_MAX_HEALTH] = min(self.env.mem[ram.LINK_MAX_HEALTH], 16)
         self.env.pb.memory[ram.LINK_HEALTH] = min(self.env.mem[ram.LINK_HEALTH], 16)
-        # Force le rafraîchissement des icônes d'objets dans le HUD (cases B et A)
-        self.env.pb.memory[0xCBEA] = 0x01
+        # Commence à 0 rubis
+        self.env.pb.memory[ram.RUPEES] = 0
+        self.env.pb.memory[ram.RUPEES + 1] = 0
+        # Force le rafraîchissement des icônes d'objets et des rubis dans le HUD
+        self.env.pb.memory[0xCBEA] = 0x09
         self.env.step(set(), 1, True)   # une frame rendue pour la première observation
         self.t = Tracker(self.env.mem)
         self.prefill_rooms, self.prefill_kinds = prefill_rooms, prefill_kinds
@@ -117,6 +126,7 @@ class Episode:
         self.kinds = set(prefill_kinds)
         self.room_kills = {}
         self.health = self.env.mem[ram.LINK_HEALTH]
+        self.rupees = 0
         self.equipped_items = {self.env.mem[EQUIP_B], self.env.mem[EQUIP_A]} - {0}
         self.horizon = horizon
         self.steps = self.idle = 0
@@ -161,6 +171,13 @@ class Episode:
             self.equipped_items |= new_items
             r += W_EQUIP * len(new_items)
 
+        # Micro-bonus pour chaque rubis gagné (ramassé)
+        cur_rupees = bcd_rupees(m)
+        rupees_gained = cur_rupees - self.rupees
+        if rupees_gained > 0:
+            r += W_RUPEE * rupees_gained
+        self.rupees = cur_rupees
+
         # Micro-pénalité continue si un menu est ouvert (l'incite à refermer vite)
         if m[ram.OPENED_MENU]:
             r += W_MENU
@@ -169,7 +186,7 @@ class Episode:
             r += W_DEATH
         self.steps += 1
         self.ret += r
-        if new or paid > 0 or new_items:
+        if new or paid > 0 or new_items or rupees_gained > 0:
             self.idle = 0
         elif not busy(m):
             self.idle += 1

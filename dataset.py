@@ -96,10 +96,12 @@ def worker(i, args):
                 start_label = "horon"
                 env.load(read_state(args.start))
 
-        # Limite de survie à 4 coeurs et affichage des icônes d'objets dans le HUD
+        # Limite de survie à 4 coeurs, 0 rubis et affichage complet dans le HUD
         env.pb.memory[ram.LINK_MAX_HEALTH] = min(env.mem[ram.LINK_MAX_HEALTH], 16)
         env.pb.memory[ram.LINK_HEALTH] = min(env.mem[ram.LINK_HEALTH], 16)
-        env.pb.memory[0xCBEA] = 0x01
+        env.pb.memory[ram.RUPEES] = 0
+        env.pb.memory[ram.RUPEES + 1] = 0
+        env.pb.memory[0xCBEA] = 0x09
 
         if models and rng.random() < args.model_frac:
             name = rng.choice(sorted(models))

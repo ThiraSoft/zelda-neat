@@ -15,7 +15,7 @@ TREASURES = (SWORD, SHIELD, BOMBS, BOOMERANG, ROD, MAGNET, SLINGSHOT, SHOVEL,
 
 RAM = {
     0xC6A3: 0x10, 0xC6A2: 0x10,          # 4 coeurs (en quarts)
-    0xC6A5: 0x99, 0xC6A6: 0x09,          # 999 rubis (BCD)
+    0xC6A5: 0x00, 0xC6A6: 0x00,          # 0 rubis (BCD)
     0xC6A9: 3,                           # bouclier miroir
     0xC6AA: 0x50, 0xC6AB: 0x50,          # bombes 50/50 (BCD)
     0xC6AC: 3,                           # épée de maître
@@ -48,8 +48,8 @@ m[0xC680], m[0xC681] = args.b, args.a
 storage = [i for i in items if i not in (args.b, args.a)]
 for i in range(16):
     m[0xC682 + i] = storage[i] if i < len(storage) else 0
-# Force le rafraîchissement des icônes d'objets dans le HUD (cases B et A)
-m[0xCBEA] = 0x01
+# Force le rafraîchissement des icônes du HUD (cases B/A et rubis)
+m[0xCBEA] = 0x09
 env.step(set(), 15, True)
 open(args.out, "wb").write(env.save())
 print("écrit", args.out)
