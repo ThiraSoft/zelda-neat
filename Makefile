@@ -35,6 +35,8 @@ WARP ?= 0.35
 SOLO_MINUTES ?= 15
 PPO_MAX_SECONDS ?= 1200
 PPO_PATIENCE ?= 120
+PPO_LR ?= 3.5e-4
+PPO_ENT ?= 0.02
 PPO_ARGS ?=
 # imitation des démos : poids dans la perte PPO, pas à chaque nouvelle démo (0 = PPO pur sur le curriculum)
 BC_COEF ?= 0.0
@@ -78,6 +80,7 @@ PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword
 	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) --warp $(WARP) \
 	--max-seconds $(PPO_MAX_SECONDS) --patience $(PPO_PATIENCE) \
 	--solo-minutes $(SOLO_MINUTES) --solo-seconds $(SOLO_SECONDS) \
+	--lr $(PPO_LR) --ent $(PPO_ENT) \
 	--bc-coef $(BC_COEF) --bc-burst $(BC_BURST) $(PPO_ARGS)
 # Reprise automatique si le run a déjà un checkpoint, sinon nouveau run.
 RESUME = $(if $(wildcard $(RUN)/ckpt-*),--resume,)
