@@ -16,13 +16,14 @@ from .obs import ACTIONS, Observer, observe
 from .paths import build_demo
 from .runner import FRAMES_PER_ACTION, busy
 
-W_ROOM = 1.0      # salle (groupe, salle) jamais vue pendant l'épisode
+W_ROOM = 2.0      # salle (groupe, salle) jamais vue pendant l'épisode (hausse pour motiver l'exploration)
 W_VARIANT = 0.1   # même salle dans une autre saison : peu, sinon changer de saison sur place rapporte
 W_KIND = 1.0      # type d'ennemi tué pour la première fois de l'épisode
 W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
 KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
 W_STORY = 1.0     # bit d'histoire gagné
-W_TILE = 0.05     # case visitée / interaction de décor (buissons, pots, etc.)
+W_TILE = 0.01     # case visitée (réduit de 0.05 à 0.01 pour éviter le piétinement en boucle)
+W_BACKTRACK = -0.2  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
 W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
 W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
@@ -128,6 +129,9 @@ class Episode:
         self.health = self.env.mem[ram.LINK_HEALTH]
         self.rupees = 0
         self.equipped_items = {self.env.mem[EQUIP_B], self.env.mem[EQUIP_A]} - {0}
+        self.current_room = (self.env.mem[ram.ACTIVE_GROUP], self.env.mem[ram.ACTIVE_ROOM])
+        self.prev_room = None
+        self.room_transition_step = 0
         self.horizon = horizon
         self.steps = self.idle = 0
         self.ret = 0.0
@@ -145,6 +149,13 @@ class Episode:
         new = t.update(m, FRAMES_PER_ACTION)
         room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM])
         r = 0.0
+        if room != self.current_room:
+            if room == self.prev_room and (self.steps - self.room_transition_step) < 25:
+                # Demi-tour immédiat / aller-retour à la bordure d'écran (< 5 secondes de jeu)
+                r += W_BACKTRACK
+            self.prev_room = self.current_room
+            self.current_room = room
+            self.room_transition_step = self.steps
         if room not in self.rooms:
             self.rooms.add(room)
             r += W_ROOM
