@@ -53,7 +53,7 @@ def main():
     ap.add_argument("--envs-per-worker", type=int, default=4)
     ap.add_argument("--steps", type=int, default=256, help="pas par env entre deux mises à jour")
     ap.add_argument("--epochs", type=int, default=4)
-    ap.add_argument("--minibatches", type=int, default=4)
+    ap.add_argument("--minibatches", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2.5e-4)
     ap.add_argument("--gamma", type=float, default=0.997)
     ap.add_argument("--lam", type=float, default=0.95)
