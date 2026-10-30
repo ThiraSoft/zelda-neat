@@ -90,6 +90,7 @@ class ZeldaEnv:
                 m[a] = old
                 break
         m[EQUIP_A] = item
+        m[0xCBEA] = 0x01  # wStatusBarNeedsRefresh : force la mise à jour visuelle du HUD
 
     def save(self):
         f = io.BytesIO()

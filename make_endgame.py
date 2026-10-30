@@ -48,6 +48,8 @@ m[0xC680], m[0xC681] = args.b, args.a
 storage = [i for i in items if i not in (args.b, args.a)]
 for i in range(16):
     m[0xC682 + i] = storage[i] if i < len(storage) else 0
-env.step(set(), 2)
+# Force le rafraîchissement des icônes d'objets dans le HUD (cases B et A)
+m[0xCBEA] = 0x01
+env.step(set(), 15, True)
 open(args.out, "wb").write(env.save())
 print("écrit", args.out)

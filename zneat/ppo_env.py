@@ -77,6 +77,8 @@ class Episode:
         # Limite les coeurs à 4 (16 quarts) pour que la survie et la mort soient un réel enjeu
         self.env.pb.memory[ram.LINK_MAX_HEALTH] = min(self.env.mem[ram.LINK_MAX_HEALTH], 16)
         self.env.pb.memory[ram.LINK_HEALTH] = min(self.env.mem[ram.LINK_HEALTH], 16)
+        # Force le rafraîchissement des icônes d'objets dans le HUD (cases B et A)
+        self.env.pb.memory[0xCBEA] = 0x01
         self.env.step(set(), 1, True)   # une frame rendue pour la première observation
         self.t = Tracker(self.env.mem)
         self.prefill_rooms, self.prefill_kinds = prefill_rooms, prefill_kinds
