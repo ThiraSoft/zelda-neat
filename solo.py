@@ -20,7 +20,7 @@ ap.add_argument("--genome", help="génome NEAT (.pkl)")
 ap.add_argument("--model", help="modèle PPO (.pt)")
 ap.add_argument("--greedy", action="store_true", help="PPO : action la plus probable au lieu d'échantillonner")
 ap.add_argument("--seed", type=int, default=0, help="PPO : graine de l'échantillonnage")
-ap.add_argument("--seconds", type=float, default=600)
+ap.add_argument("--seconds", type=float, default=1200)
 ap.add_argument("--window", action="store_true", help="affiche le jeu (vitesse réelle)")
 ap.add_argument("--random-location", nargs="?", const="spawns", metavar="DOSSIER",
                 help="part d'une cellule tirée au hasard dans DOSSIER (défaut spawns), comme dataset.py")

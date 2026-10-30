@@ -84,7 +84,7 @@ def play(env, net, state, **kw):
     return rollout(env, net_policy(net), state, **kw)
 
 
-def solo(env, policy, state, seconds=600, render=False):
+def solo(env, policy, state, seconds=1200, render=False):
     """Métrique joueur seul : une partie de `seconds` depuis `state`, sans save state ni
     patience, arrêtée seulement par la mort. Renvoie le Tracker (voir solo_line)."""
     frames = int(seconds * 60)

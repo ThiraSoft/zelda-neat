@@ -14,7 +14,7 @@ GENERATIONS ?=
 # options en plus pour train.py
 ARGS ?=
 # partie solo (joueur seul depuis Horon) : durée, fréquence dans make start (générations)
-SOLO_SECONDS ?= 600
+SOLO_SECONDS ?= 1200
 SOLO_EVERY ?= 5
 GENOME ?= models/neat.pkl
 # RANDOM_LOCATION=1 : replay, compare, ppo-replay et ppo-solo partent d'une cellule de DATASET_ARCHIVE
