@@ -122,6 +122,8 @@ def torch_policy(model, greedy=False, seed=0):
     observer = Observer()
     state = [model.initial_state(1)]
     zero = torch.zeros(1, 1)
+    held_a = [False]
+    held_b = [False]
     cooldown_a = [0]
     cooldown_b = [0]
 
@@ -143,22 +145,34 @@ def torch_policy(model, greedy=False, seed=0):
 
         wanted = set(act)
         if "a" in wanted:
-            if cooldown_a[0] > 0:
+            if held_a[0]:
+                pass
+            elif cooldown_a[0] > 0:
                 wanted.remove("a")
                 cooldown_a[0] -= 1
             else:
+                held_a[0] = True
+        else:
+            if held_a[0]:
+                held_a[0] = False
                 cooldown_a[0] = 2
-        elif cooldown_a[0] > 0:
-            cooldown_a[0] -= 1
+            elif cooldown_a[0] > 0:
+                cooldown_a[0] -= 1
 
         if "b" in wanted:
-            if cooldown_b[0] > 0:
+            if held_b[0]:
+                pass
+            elif cooldown_b[0] > 0:
                 wanted.remove("b")
                 cooldown_b[0] -= 1
             else:
+                held_b[0] = True
+        else:
+            if held_b[0]:
+                held_b[0] = False
                 cooldown_b[0] = 2
-        elif cooldown_b[0] > 0:
-            cooldown_b[0] -= 1
+            elif cooldown_b[0] > 0:
+                cooldown_b[0] -= 1
 
         return wanted
     return policy

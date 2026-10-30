@@ -134,6 +134,8 @@ class Episode:
         self.current_room = (self.env.mem[ram.ACTIVE_GROUP], self.env.mem[ram.ACTIVE_ROOM])
         self.prev_room = None
         self.room_transition_step = 0
+        self.held_a = False
+        self.held_b = False
         self.cooldown_a = 0
         self.cooldown_b = 0
         self.horizon = horizon
@@ -149,28 +151,47 @@ class Episode:
         t = self.t
         n_variants, n_tiles, story, kills = len(t.rooms), len(t.tiles), t.story, t.kills
 
-        # Cooldown et micro-pénalité sur les appuis A/B répétés (anti-spam bouclier/épée)
+        # Maintien continu autorisé (bouclier levé ou épée chargée), pause / pénalité après relâchement
         wanted = set(ACTIONS[a])
         spam_penalty = 0.0
+
         if "a" in wanted:
-            if self.cooldown_a > 0:
+            if self.held_a:
+                # Maintien en cours : pleinement autorisé
+                pass
+            elif self.cooldown_a > 0:
+                # Tentative de ré-appui trop rapide après relâchement
                 wanted.remove("a")
                 spam_penalty += W_SPAM
                 self.cooldown_a -= 1
             else:
+                self.held_a = True
+        else:
+            if self.held_a:
+                # Relâchement : déclenche le cooldown post-relâchement
+                self.held_a = False
                 self.cooldown_a = COOLDOWN_STEPS
-        elif self.cooldown_a > 0:
-            self.cooldown_a -= 1
+            elif self.cooldown_a > 0:
+                self.cooldown_a -= 1
 
         if "b" in wanted:
-            if self.cooldown_b > 0:
+            if self.held_b:
+                # Maintien en cours (charge attaque tourbillon)
+                pass
+            elif self.cooldown_b > 0:
+                # Ré-appui trop rapide
                 wanted.remove("b")
                 spam_penalty += W_SPAM
                 self.cooldown_b -= 1
             else:
+                self.held_b = True
+        else:
+            if self.held_b:
+                # Relâchement
+                self.held_b = False
                 self.cooldown_b = COOLDOWN_STEPS
-        elif self.cooldown_b > 0:
-            self.cooldown_b -= 1
+            elif self.cooldown_b > 0:
+                self.cooldown_b -= 1
 
         self.env.step(wanted, FRAMES_PER_ACTION, True)
         m = self.env.mem
