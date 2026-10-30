@@ -48,13 +48,18 @@ def impala_cnn(channels=(32, 64, 64)):
 
 
 class Policy(nn.Module):
-    """arch "nature" : CNN de DQN, fc 256. arch "impala" : CNN résiduel, fc 512 (modèle plus gros)."""
+    """arch "nature" : CNN de DQN, fc 256. arch "impala" : CNN élargi (48->96->192), fc 512 (5,6M params)."""
 
     def __init__(self, n_vec=PPO_INPUTS, n_act=len(ACTIONS), hidden=256, arch="nature"):
         super().__init__()
         self.hidden, self.n_vec, self.arch = hidden, n_vec, arch
         if arch == "impala":
-            self.cnn, n_fc = impala_cnn(), 512
+            self.cnn = nn.Sequential(
+                Conv(1, 48, 8, 4), nn.ReLU(),
+                Conv(48, 96, 4, 2), nn.ReLU(),
+                Conv(96, 192, 3, 1), nn.ReLU(),
+                nn.Flatten())
+            n_fc = 512
         else:
             self.cnn = nn.Sequential(
                 Conv(1, 32, 8, 4), nn.ReLU(), Conv(32, 64, 4, 2), nn.ReLU(),
