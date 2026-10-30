@@ -180,25 +180,37 @@ def torch_policy(model, greedy=False, seed=0):
 
 
 def solo_eval(rom, seed_path, model_path, seconds, step, run):
-    """Joue le modèle seul depuis Horon, échantillonné puis glouton. Garde dans model-best.pt
-    le modèle au meilleur score échantillonné (c'est lui qui servira à générer des parties)."""
+    """Joue le modèle seul depuis Horon sur 5 graines pour évaluer robustesse et pic d'exploration.
+    Garde dans model-best.pt le modèle à la meilleure moyenne (avec départage au max)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     torch.set_num_threads(1)
     model = load_model(model_path)
     env = ZeldaEnv(rom)
     state = read_state(seed_path)
-    ts = solo(env, torch_policy(model, seed=0), state, seconds, render=True)
-    tg = solo(env, torch_policy(model, greedy=True), state, seconds, render=True)
+
+    # Évaluation sur 5 graines distinctes (5 minutes de jeu par graine = 300s)
+    eval_seconds = min(seconds, 300)
+    seeds = (0, 42, 123, 2024, 999)
+    trackers = [solo(env, torch_policy(model, seed=s), state, eval_seconds, render=True) for s in seeds]
+    scores = [solo_score(t) for t in trackers]
+    mean_score = sum(scores) / len(scores)
+    max_score = max(scores)
+
+    tg = solo(env, torch_policy(model, greedy=True), state, eval_seconds, render=True)
     best_path = os.path.join(run, "solo-best.json")
-    best = json.load(open(best_path)) if os.path.exists(best_path) else {"score": -1}
-    score = solo_score(ts)
+    best = json.load(open(best_path)) if os.path.exists(best_path) else {"score": -1, "mean": -1, "max": -1}
+    prev_mean = best.get("mean", float(best.get("score", -1)))
+    prev_max = best.get("max", best.get("score", -1))
+
     mark = ""
-    if score > best["score"]:
+    # Règle d'élection : Moyenne en priorité, départage au Max
+    if mean_score > prev_mean or (round(mean_score, 1) == round(prev_mean, 1) and max_score > prev_max):
         shutil.copy(model_path, os.path.join(run, "model-best.pt"))
-        json.dump({"score": score, "step": step}, open(best_path, "w"))
-        mark = ", nouveau meilleur"
-    print(f"solo : {solo_line(ts)} [échantillonné] | glouton score {solo_score(tg)} "
-          f"(étape {step / 1e6:.2f} M{mark})", flush=True)
+        json.dump({"score": max_score, "mean": round(mean_score, 2), "max": max_score, "step": step}, open(best_path, "w"))
+        mark = ", NOUVEAU MEILLEUR"
+
+    print(f"solo : moyenne {mean_score:.2f} [min {min(scores)}, max {max_score}] sur 5 graines | "
+          f"glouton {solo_score(tg)} (étape {step / 1e6:.2f} M{mark})", flush=True)
 
 
 class DemoData:
