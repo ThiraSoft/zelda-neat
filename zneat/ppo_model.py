@@ -122,6 +122,8 @@ def torch_policy(model, greedy=False, seed=0):
     observer = Observer()
     state = [model.initial_state(1)]
     zero = torch.zeros(1, 1)
+    cooldown_a = [0]
+    cooldown_b = [0]
 
     @torch.no_grad()
     def policy(env):
@@ -135,8 +137,30 @@ def torch_policy(model, greedy=False, seed=0):
                                     state[0], zero)
         logits = logits[0, 0]
         if greedy:
-            return ACTIONS[int(logits.argmax())]
-        return ACTIONS[int(torch.multinomial(torch.softmax(logits, -1), 1, generator=gen))]
+            act = ACTIONS[int(logits.argmax())]
+        else:
+            act = ACTIONS[int(torch.multinomial(torch.softmax(logits, -1), 1, generator=gen))]
+
+        wanted = set(act)
+        if "a" in wanted:
+            if cooldown_a[0] > 0:
+                wanted.remove("a")
+                cooldown_a[0] -= 1
+            else:
+                cooldown_a[0] = 2
+        elif cooldown_a[0] > 0:
+            cooldown_a[0] -= 1
+
+        if "b" in wanted:
+            if cooldown_b[0] > 0:
+                wanted.remove("b")
+                cooldown_b[0] -= 1
+            else:
+                cooldown_b[0] = 2
+        elif cooldown_b[0] > 0:
+            cooldown_b[0] -= 1
+
+        return wanted
     return policy
 
 

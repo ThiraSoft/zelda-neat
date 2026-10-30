@@ -24,6 +24,8 @@ KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le fa
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.01     # case visitée (réduit de 0.05 à 0.01 pour éviter le piétinement en boucle)
 W_BACKTRACK = -0.2  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
+W_SPAM = -0.005     # micro-pénalité si appui répété A/B pendant le cooldown (anti-spam bouclier/épée)
+COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max ~1.7/s)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
 W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
 W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
@@ -132,6 +134,8 @@ class Episode:
         self.current_room = (self.env.mem[ram.ACTIVE_GROUP], self.env.mem[ram.ACTIVE_ROOM])
         self.prev_room = None
         self.room_transition_step = 0
+        self.cooldown_a = 0
+        self.cooldown_b = 0
         self.horizon = horizon
         self.steps = self.idle = 0
         self.ret = 0.0
@@ -144,11 +148,35 @@ class Episode:
     def step(self, a):
         t = self.t
         n_variants, n_tiles, story, kills = len(t.rooms), len(t.tiles), t.story, t.kills
-        self.env.step(ACTIONS[a], FRAMES_PER_ACTION, True)
+
+        # Cooldown et micro-pénalité sur les appuis A/B répétés (anti-spam bouclier/épée)
+        wanted = set(ACTIONS[a])
+        spam_penalty = 0.0
+        if "a" in wanted:
+            if self.cooldown_a > 0:
+                wanted.remove("a")
+                spam_penalty += W_SPAM
+                self.cooldown_a -= 1
+            else:
+                self.cooldown_a = COOLDOWN_STEPS
+        elif self.cooldown_a > 0:
+            self.cooldown_a -= 1
+
+        if "b" in wanted:
+            if self.cooldown_b > 0:
+                wanted.remove("b")
+                spam_penalty += W_SPAM
+                self.cooldown_b -= 1
+            else:
+                self.cooldown_b = COOLDOWN_STEPS
+        elif self.cooldown_b > 0:
+            self.cooldown_b -= 1
+
+        self.env.step(wanted, FRAMES_PER_ACTION, True)
         m = self.env.mem
         new = t.update(m, FRAMES_PER_ACTION)
         room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM])
-        r = 0.0
+        r = spam_penalty
         if room != self.current_room:
             if room == self.prev_room and (self.steps - self.room_transition_step) < 25:
                 # Demi-tour immédiat / aller-retour à la bordure d'écran (< 5 secondes de jeu)
