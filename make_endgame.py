@@ -14,7 +14,7 @@ TREASURES = (SWORD, SHIELD, BOMBS, BOOMERANG, ROD, MAGNET, SLINGSHOT, SHOVEL,
              BRACELET, FEATHER, SATCHEL, FLIPPERS) + SEEDS
 
 RAM = {
-    0xC6A3: 0x40, 0xC6A2: 0x40,          # 16 coeurs (en quarts)
+    0xC6A3: 0x10, 0xC6A2: 0x10,          # 4 coeurs (en quarts)
     0xC6A5: 0x99, 0xC6A6: 0x09,          # 999 rubis (BCD)
     0xC6A9: 3,                           # bouclier miroir
     0xC6AA: 0x50, 0xC6AB: 0x50,          # bombes 50/50 (BCD)
