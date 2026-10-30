@@ -32,6 +32,8 @@ ENVS ?= 4
 DEMOS ?= 4
 HORON ?= 0.2
 SOLO_MINUTES ?= 15
+PPO_MAX_SECONDS ?= 1200
+PPO_PATIENCE ?= 120
 PPO_ARGS ?=
 # imitation des démos : poids dans la perte PPO, pas à chaque nouvelle démo (0 = PPO pur sur le curriculum)
 BC_COEF ?= 0.0
@@ -72,6 +74,7 @@ MAKE_DATASET = $(PPO_PY) dataset.py --archive $(DATASET_ARCHIVE) --out $(DATASET
 PPO_RESUME = $(if $(wildcard $(PPO_RUN)/ckpt.pt),--resume,)
 PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword $(wildcard $(STATES))) \
 	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) \
+	--max-seconds $(PPO_MAX_SECONDS) --patience $(PPO_PATIENCE) \
 	--solo-minutes $(SOLO_MINUTES) --solo-seconds $(SOLO_SECONDS) \
 	--bc-coef $(BC_COEF) --bc-burst $(BC_BURST) $(PPO_ARGS)
 # Reprise automatique si le run a déjà un checkpoint, sinon nouveau run.

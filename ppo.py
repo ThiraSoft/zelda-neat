@@ -63,8 +63,8 @@ def main():
     ap.add_argument("--hidden", type=int, default=512)
     ap.add_argument("--arch", choices=("nature", "impala"), default="impala",
                     help="impala : CNN résiduel plus profond, fc 512")
-    ap.add_argument("--max-seconds", type=float, default=600, help="durée max d'un épisode")
-    ap.add_argument("--patience", type=float, default=30, help="fin d'épisode après N s sans rien de nouveau")
+    ap.add_argument("--max-seconds", type=float, default=1200, help="durée max d'un épisode")
+    ap.add_argument("--patience", type=float, default=120, help="fin d'épisode après N s sans rien de nouveau")
     ap.add_argument("--horon", type=float, default=0.2, help="part des épisodes qui partent de Horon")
     ap.add_argument("--demos", type=int, default=4, help="cibles de l'archive suivies en même temps")
     ap.add_argument("--demo-every", type=int, default=32, help="un state de démo tous les N pas")
