@@ -1,6 +1,7 @@
 """Réseau du joueur (CNN sur l'écran + vecteur, puis LSTM) et partie solo d'un modèle sauvé."""
 import json
 import os
+import random
 import shutil
 import signal
 
