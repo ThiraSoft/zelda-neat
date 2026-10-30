@@ -6,6 +6,9 @@ dist/
 *.tmp.npz
 *.gbc
 *.pt
+!models/ppo.pt
+!models/ppo-explore.pt
+!models/ppo-kills.pt
 *.pkl
 models/ppo-impala*
 models/*-best*
