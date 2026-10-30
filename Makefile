@@ -99,7 +99,7 @@ TRAIN = $(PY) train.py --run $(RUN) --states $(STATES) --workers $(WORKERS) \
 	--random-seconds $(RANDOM_SECONDS) --solo-every $(SOLO_EVERY) --solo-seconds $(SOLO_SECONDS) $(if $(strip $(GENERATIONS)),--generations $(GENERATIONS),) $(ARGS)
 
 .PHONY: help install bench run neat start start-tmux stop status log replay compare reset package vault pull \
-	solo paths paths-check install-ppo ppo ppo-start ppo-stop ppo-log ppo-solo ppo-replay ppo-reset dataset dataset-start dataset-stop neat-spawns neat-spawns-start neat-spawns-stop neat-spawns-log
+	solo paths paths-check install-ppo ppo ppo-start ppo-stop ppo-log ppo-solo ppo-replay ppo-reset record dataset dataset-start dataset-stop neat-spawns neat-spawns-start neat-spawns-stop neat-spawns-log
 
 help:
 	@echo "make install      crée .venv"
@@ -129,6 +129,7 @@ help:
 	@echo "make ppo-solo     MODEL (défaut models/ppo.pt) joue seul depuis Horon"
 	@echo "make ppo-replay   regarde MODEL jouer depuis Horon (fenêtre)"
 	@echo "make ppo-reset    efface PPO_RUN (demande CONFIRM=oui)"
+	@echo "make record       joue et enregistre une démonstration humaine pour l'imitation (fenêtre SDL)"
 	@echo "make neat-spawns-start / -stop / -log   NEAT en score solo, départs au hasard dans spawns/, run NEAT_RUN"
 	@echo "                  meilleur génome solo dans NEAT_RUN/best-solo.pkl (make compare GENOME=...)"
 	@echo "make dataset      enregistre des parties (écran + boutons) dans DATASET jusqu'à DATASET_GB Go"
@@ -259,6 +260,13 @@ ppo-solo:
 
 ppo-replay:
 	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS) --window
+
+RECORD_NAME ?=
+RECORD_SCALE ?= 3
+RECORD_START ?= $(firstword $(wildcard $(STATES)))
+
+record:
+	$(PPO_PY) record.py --start $(RECORD_START) --scale $(RECORD_SCALE) $(if $(strip $(RECORD_NAME)),--name $(RECORD_NAME),)
 
 ppo-reset:
 	@[ "$(CONFIRM)" = oui ] || { echo "efface $(PPO_RUN) : relance avec make ppo-reset CONFIRM=oui"; exit 1; }
