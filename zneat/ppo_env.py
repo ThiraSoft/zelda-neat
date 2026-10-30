@@ -30,7 +30,8 @@ W_SPAM = -0.005     # micro-pénalité si appui répété A/B pendant le cooldow
 COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max ~1.7/s)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
 W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
-W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
+W_MENU = -0.02    # pénalité continue dans le menu pour éviter qu'il s'y réfugie
+W_MENU_STAGNATION = -0.03  # sur-pénalité si Link traîne > 15 pas (> 3s) dans le menu sans en sortir
 W_DAMAGE = -0.08  # par quart de coeur perdu (incite à esquiver/parer, -0.32 par coeur entier)
 W_DEATH = -2.0    # mort : annule entièrement une découverte de salle pour éviter le jeu kamikaze
 
@@ -137,6 +138,7 @@ class Episode:
         self.prev_room = None
         self.room_transition_step = 0
         self.room_steps = 0
+        self.menu_steps = 0
         self.pos_history = deque(maxlen=15)
         self.held_a = False
         self.held_b = False
@@ -225,17 +227,30 @@ class Episode:
         r += W_VARIANT * (len(t.rooms) - n_variants) + W_TILE * (len(t.tiles) - n_tiles)
         r += W_STORY * (t.story - story)
 
+        in_menu = bool(m[ram.OPENED_MENU])
+        cutscene = busy(m) and not in_menu
+
+        # Pénalité de séjour dans le menu (anti-exploit de pause)
+        if in_menu:
+            self.menu_steps += 1
+            r += W_MENU
+            if self.menu_steps > 15:
+                # Au-delà de 3s dans le menu sans en sortir, sur-pénalité lourde
+                r += W_MENU_STAGNATION
+        else:
+            self.menu_steps = 0
+
         # Pénalité de stagnation locale (tourner en rond sur place < 32 px sur 15 pas = 3s)
         pos = (m[ram.LINK + ram.OBJ_YH], m[ram.LINK + ram.OBJ_XH])
         self.pos_history.append(pos)
-        if len(self.pos_history) == 15 and not busy(m):
+        if len(self.pos_history) == 15 and not cutscene and not in_menu:
             span = max(max(p[0] for p in self.pos_history) - min(p[0] for p in self.pos_history),
                        max(p[1] for p in self.pos_history) - min(p[1] for p in self.pos_history))
             if span < 32:
                 r += W_LOCAL_STAGNATION
 
         # Pénalité de stagnation en salle (> 35 pas = 7s dans la même pièce sans progrès)
-        if self.room_steps > 35 and not busy(m) and not (new or paid > 0):
+        if self.room_steps > 35 and not cutscene and not in_menu and not (new or paid > 0):
             r += W_ROOM_STAGNATION
 
         # Dégâts subis (par quart de coeur)
@@ -258,17 +273,13 @@ class Episode:
             r += W_RUPEE * rupees_gained
         self.rupees = cur_rupees
 
-        # Micro-pénalité continue si un menu est ouvert (l'incite à refermer vite)
-        if m[ram.OPENED_MENU]:
-            r += W_MENU
-
         if t.dead:
             r += W_DEATH
         self.steps += 1
         self.ret += r
         if new or paid > 0 or new_items or rupees_gained > 0:
             self.idle = 0
-        elif not busy(m):
+        elif not cutscene:
             self.idle += 1
         done = t.dead or self.steps >= self.horizon or self.idle >= self.patience
         info = None

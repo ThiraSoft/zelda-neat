@@ -84,7 +84,7 @@ def map_buttons_to_action(b_set):
         return ACTION_MAP[frozenset({"b"})]
     if has_a:
         return ACTION_MAP[frozenset({"a"})]
-    if "start" in b_set:
+    if "start" in b_set and frozenset({"start"}) in ACTION_MAP:
         return ACTION_MAP[frozenset({"start"})]
     return 0  # set() neutre
 

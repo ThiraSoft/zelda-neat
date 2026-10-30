@@ -139,9 +139,10 @@ def torch_policy(model, greedy=False, seed=0):
                                     state[0], zero)
         logits = logits[0, 0]
         if greedy:
-            act = ACTIONS[int(logits.argmax())]
+            idx = int(logits.argmax())
         else:
-            act = ACTIONS[int(torch.multinomial(torch.softmax(logits, -1), 1, generator=gen))]
+            idx = int(torch.multinomial(torch.softmax(logits, -1), 1, generator=gen))
+        act = ACTIONS[idx] if idx < len(ACTIONS) else set()
 
         wanted = set(act)
         if "a" in wanted:
