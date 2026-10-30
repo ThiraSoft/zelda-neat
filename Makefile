@@ -31,6 +31,7 @@ PPO_WORKERS ?= $(shell echo $$(( $(WORKERS) > 1 ? $(WORKERS) - 1 : 1 )))
 ENVS ?= 4
 DEMOS ?= 4
 HORON ?= 0.2
+WARP ?= 0.25
 SOLO_MINUTES ?= 15
 PPO_MAX_SECONDS ?= 1200
 PPO_PATIENCE ?= 120
@@ -73,7 +74,7 @@ MAKE_DATASET = $(PPO_PY) dataset.py --archive $(DATASET_ARCHIVE) --out $(DATASET
 	--model $(DATASET_MODEL) --model-frac $(DATASET_MODEL_FRAC)
 PPO_RESUME = $(if $(wildcard $(PPO_RUN)/ckpt.pt),--resume,)
 PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword $(wildcard $(STATES))) \
-	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) \
+	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) --warp $(WARP) \
 	--max-seconds $(PPO_MAX_SECONDS) --patience $(PPO_PATIENCE) \
 	--solo-minutes $(SOLO_MINUTES) --solo-seconds $(SOLO_SECONDS) \
 	--bc-coef $(BC_COEF) --bc-burst $(BC_BURST) $(PPO_ARGS)

@@ -66,6 +66,8 @@ def main():
     ap.add_argument("--max-seconds", type=float, default=1200, help="durée max d'un épisode")
     ap.add_argument("--patience", type=float, default=120, help="fin d'épisode après N s sans rien de nouveau")
     ap.add_argument("--horon", type=float, default=0.2, help="part des épisodes qui partent de Horon")
+    ap.add_argument("--warp", type=float, default=0.25,
+                    help="part des épisodes téléportés sur des cartes aléatoires (Overworld, Subrosia, Donjons)")
     ap.add_argument("--demos", type=int, default=4, help="cibles de l'archive suivies en même temps")
     ap.add_argument("--demo-every", type=int, default=32, help="un state de démo tous les N pas")
     ap.add_argument("--back-seconds", type=float, default=10, help="recul du départ à chaque palier")
@@ -105,7 +107,7 @@ def main():
         raise SystemExit(f"{args.run} contient déjà un entraînement : --resume ou autre --run")
 
     back = max(1, round(args.back_seconds * 60 / FRAMES_PER_ACTION / args.demo_every))
-    curriculum = Curriculum(args.horon, back, args.success, args.window, jitter=min(2, back))
+    curriculum = Curriculum(args.horon, back, args.success, args.window, jitter=min(2, back), warp=args.warp)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Policy(hidden=args.hidden, arch=args.arch).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)

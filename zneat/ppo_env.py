@@ -10,7 +10,7 @@ import numpy as np
 
 from . import ram
 from .archive import read_state
-from .env import ZeldaEnv, EQUIP_B, EQUIP_A
+from .env import ZeldaEnv, EQUIP_B, EQUIP_A, tile_value
 from .fitness import Tracker
 from .obs import ACTIONS, Observer, observe
 from .paths import build_demo
@@ -50,10 +50,39 @@ class Episode:
 
     def reset(self, cur):
         demos, cells = cur["demos"], cur.get("cells") or []
+        horon = cur["horon"]
+        warp = cur.get("warp", 0.0)
         self.demo, self.ptr, self.idx, self.target = None, None, None, None
         prefill_rooms, prefill_kinds, horizon = set(), set(), self.max_steps
         r = self.rng.random()
-        if demos and r >= cur["horon"]:
+
+        if r < horon:
+            self.env.load(self.seed)
+            step_start = 0
+        elif r < horon + warp:
+            # Téléportation vers une carte aléatoire du monde entier (Overworld, Subrosia, Donjons)
+            self.env.load(self.seed)
+            g = self.rng.choice([0, 0, 1, 4, 5])
+            room_id = self.rng.randint(0, 63 if g == 1 else 255)
+            self.env.pb.memory[0xCC63] = 0x80 | g
+            self.env.pb.memory[0xCC64] = room_id
+            self.env.pb.memory[0xCC66] = 0x45
+            self.env.pb.memory[0xCC67] = 0x01
+            self.env.pb.memory[ram.SEASON] = self.rng.randint(0, 3)
+            for _ in range(35):
+                self.env.step(set(), 1, False)
+
+            m = self.env.mem
+            coll = m[ram.ROOM_COLLISIONS:ram.ROOM_COLLISIONS + ram.ROOM_STRIDE * ram.ROOM_ROWS]
+            rows, cols = (11, 15) if m[ram.ROOM_IS_LARGE] else (8, 10)
+            free = [(y, x) for y in range(1, rows - 1) for x in range(1, cols - 1)
+                    if tile_value(coll[y * ram.ROOM_STRIDE + x]) == 0.0]
+            if free:
+                ty, tx = self.rng.choice(free)
+                self.env.pb.memory[ram.LINK + ram.OBJ_YH] = (ty << 4) + 8
+                self.env.pb.memory[ram.LINK + ram.OBJ_XH] = (tx << 4) + 8
+            step_start = 0
+        elif demos:
             self.demo, self.ptr = self.rng.choice(demos)
             self.idx = max(0, self.ptr - self.rng.randint(0, cur["jitter"]))
             m = self.meta(self.demo)
@@ -67,13 +96,14 @@ class Episode:
                            + len(set(end["kinds"]) - prefill_kinds) + (end["story"] - here["story"]))
             horizon = min(self.max_steps, 2 * (pts[-1]["step"] - here["step"]) + 450)
             step_start = here["step"]
-        elif cells and r >= cur["horon"]:
+            self.env.load(state)
+        elif cells:
             state = read_state(self.rng.choice(cells))
             step_start = 0
+            self.env.load(state)
         else:
-            state = self.seed
+            self.env.load(self.seed)
             step_start = 0
-        self.env.load(state)
         # Limite les coeurs à 4 (16 quarts) pour que la survie et la mort soient un réel enjeu
         self.env.pb.memory[ram.LINK_MAX_HEALTH] = min(self.env.mem[ram.LINK_MAX_HEALTH], 16)
         self.env.pb.memory[ram.LINK_HEALTH] = min(self.env.mem[ram.LINK_HEALTH], 16)
@@ -225,8 +255,9 @@ class Curriculum:
     Quand assez d'épisodes partis du pointeur font au moins aussi bien que la démo, le pointeur
     recule vers Horon. Une démo résolue depuis son début est remplacée par une nouvelle cible."""
 
-    def __init__(self, horon, back, success, window, jitter):
+    def __init__(self, horon, back, success, window, jitter, warp=0.0):
         self.horon, self.back, self.success, self.window, self.jitter = horon, back, success, window, jitter
+        self.warp = warp
         self.demos = {}   # nom -> {"ptr", "points", "results", "solved"}
         self.cells = []
 
@@ -235,7 +266,7 @@ class Curriculum:
                             "points": n_points, "results": deque(maxlen=self.window), "solved": False}
 
     def message(self):
-        return {"horon": self.horon, "jitter": self.jitter, "cells": self.cells,
+        return {"horon": self.horon, "warp": self.warp, "jitter": self.jitter, "cells": self.cells,
                 "demos": [(n, d["ptr"]) for n, d in self.demos.items() if not d["solved"]]}
 
     def record(self, info):
