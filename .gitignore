@@ -4,3 +4,8 @@ runs/
 __pycache__/
 dist/
 *.tmp.npz
+*.gbc
+*.pt
+*.pkl
+models/ppo-impala*
+models/*-best*
