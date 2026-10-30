@@ -27,7 +27,7 @@ SOUND_WAIT_JUMPS = (0x49D1, 0x49D2, 0x49EF, 0x49F0)
 
 # Objet forcé sur A à chaque chargement (variable ZELDA_A, make A_ITEM=...). Les states de l'archive
 # ont le Rod sur A ; "feather" y met la cape de Roc. Trésors : constants/common/treasure.s.
-ITEMS = {"rod": 0x07, "feather": 0x17}
+ITEMS = {"rod": 0x07, "feather": 0x17, "shield": 0x01}
 EQUIP_B, EQUIP_A, STORAGE = 0xC680, 0xC681, range(0xC682, 0xC692)
 
 

@@ -33,7 +33,7 @@ ap.add_argument("--rom", default="rom/oos.gbc")
 ap.add_argument("--from", dest="src", required=True, help="state de départ (.state ou .state.z)")
 ap.add_argument("--out", default="states/horon-endgame.state")
 ap.add_argument("--b", type=lambda x: int(x, 0), default=SWORD, help="objet sur B")
-ap.add_argument("--a", type=lambda x: int(x, 0), default=FEATHER, help="objet sur A")
+ap.add_argument("--a", type=lambda x: int(x, 0), default=SHIELD, help="objet sur A")
 args = ap.parse_args()
 
 env = ZeldaEnv(args.rom)
