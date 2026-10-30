@@ -23,7 +23,7 @@ W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
 KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.05     # case visitée / interaction de décor (buissons, pots, etc.)
-W_EQUIP = 0.2     # première fois qu'un objet est équipé pendant l'épisode (exploration du menu)
+W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
 W_DAMAGE = -0.05  # par quart de coeur perdu (incite à esquiver/parer)
 W_DEATH = -1.0
 
