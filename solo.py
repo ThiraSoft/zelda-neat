@@ -34,7 +34,7 @@ if args.random_location:
         folder = "runs/horon/archive"
     candidates = room_capped(folder, 8)
     if candidates:
-        args.state = random.choice(candidates)
+        args.state = random.Random(args.seed).choice(candidates)
         print("départ :", args.state, flush=True)
 
 # La fenêtre SDL s'ouvre avant de charger torch : dans l'autre ordre, elle reste noire (ROCm).

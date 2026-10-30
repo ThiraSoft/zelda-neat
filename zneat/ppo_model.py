@@ -180,23 +180,43 @@ def torch_policy(model, greedy=False, seed=0):
 
 
 def solo_eval(rom, seed_path, model_path, seconds, step, run):
-    """Joue le modèle seul depuis Horon sur 5 graines pour évaluer robustesse et pic d'exploration.
+    """Joue le modèle seul sur 5 graines, chacune partant d'une position aléatoire distincte
+    du monde (tirée de l'archive). Évalue la robustesse et l'exploration générale.
     Garde dans model-best.pt le modèle à la meilleure moyenne (avec départage au max)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     torch.set_num_threads(1)
     model = load_model(model_path)
     env = ZeldaEnv(rom)
-    state = read_state(seed_path)
 
-    # Évaluation sur 5 graines distinctes (5 minutes de jeu par graine = 300s)
+    # Récupération des positions aléatoires dans l'archive si disponible
+    archive_dir = os.environ.get("ARCHIVE", "runs/horon/archive")
+    if not os.path.exists(archive_dir):
+        archive_dir = "runs/goexplore/archive"
+    candidates = []
+    if os.path.exists(archive_dir):
+        try:
+            from dataset import room_capped
+            candidates = room_capped(archive_dir, 4)
+        except Exception:
+            candidates = []
+
     eval_seconds = min(seconds, 300)
     seeds = (0, 42, 123, 2024, 999)
-    trackers = [solo(env, torch_policy(model, seed=s), state, eval_seconds, render=True) for s in seeds]
+    trackers = []
+    for s in seeds:
+        if candidates:
+            st_path = random.Random(s).choice(candidates)
+            st = read_state(st_path)
+        else:
+            st = read_state(seed_path)
+        trackers.append(solo(env, torch_policy(model, seed=s), st, eval_seconds, render=True))
+
     scores = [solo_score(t) for t in trackers]
     mean_score = sum(scores) / len(scores)
     max_score = max(scores)
 
-    tg = solo(env, torch_policy(model, greedy=True), state, eval_seconds, render=True)
+    st_default = read_state(seed_path)
+    tg = solo(env, torch_policy(model, greedy=True), st_default, eval_seconds, render=True)
     best_path = os.path.join(run, "solo-best.json")
     best = json.load(open(best_path)) if os.path.exists(best_path) else {"score": -1, "mean": -1, "max": -1}
     prev_mean = best.get("mean", float(best.get("score", -1)))
@@ -209,8 +229,8 @@ def solo_eval(rom, seed_path, model_path, seconds, step, run):
         json.dump({"score": max_score, "mean": round(mean_score, 2), "max": max_score, "step": step}, open(best_path, "w"))
         mark = ", NOUVEAU MEILLEUR"
 
-    print(f"solo : moyenne {mean_score:.2f} [min {min(scores)}, max {max_score}] sur 5 graines | "
-          f"glouton {solo_score(tg)} (étape {step / 1e6:.2f} M{mark})", flush=True)
+    print(f"solo : moyenne {mean_score:.2f} [min {min(scores)}, max {max_score}] sur 5 positions | "
+          f"glouton Horon {solo_score(tg)} (étape {step / 1e6:.2f} M{mark})", flush=True)
 
 
 class DemoData:
