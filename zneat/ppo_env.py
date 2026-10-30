@@ -23,16 +23,16 @@ W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
 KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
 W_STORY = 1.0     # bit d'histoire gagné
 W_TILE = 0.01     # case visitée (réduit de 0.05 à 0.01 pour éviter le piétinement en boucle)
-W_BACKTRACK = -0.2  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
-W_LOCAL_STAGNATION = -0.005  # pénalité si Link tourne en rond sur place (< 32 px sur 20 pas = 4s)
-W_ROOM_STAGNATION = -0.003   # pénalité si Link traîne > 50 pas (10s) dans la même salle sans progrès
+W_BACKTRACK = -0.5  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
+W_LOCAL_STAGNATION = -0.01  # pénalité si Link tourne en rond sur place (< 32 px sur 20 pas = 4s)
+W_ROOM_STAGNATION = -0.005   # pénalité si Link traîne > 50 pas (10s) dans la même salle sans progrès
 W_SPAM = -0.005     # micro-pénalité si appui répété A/B pendant le cooldown (anti-spam bouclier/épée)
 COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max ~1.7/s)
 W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
 W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
 W_MENU = -0.001     # micro-pénalité par pas dans le menu pour éviter qu'il y reste bloqué
-W_DAMAGE = -0.05  # par quart de coeur perdu (incite à esquiver/parer)
-W_DEATH = -1.0
+W_DAMAGE = -0.08  # par quart de coeur perdu (incite à esquiver/parer, -0.32 par coeur entier)
+W_DEATH = -2.0    # mort : annule entièrement une découverte de salle pour éviter le jeu kamikaze
 
 
 def bcd_rupees(m):
