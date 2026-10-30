@@ -50,7 +50,15 @@ def worker(i, args):
         import torch
         torch.set_num_threads(1)
         from zneat.ppo_model import load_model, torch_policy
-        models = {os.path.splitext(os.path.basename(m))[0]: load_model(m) for m in args.model}
+        for m in args.model:
+            if os.path.exists(m):
+                try:
+                    name = os.path.splitext(os.path.basename(m))[0]
+                    models[name] = load_model(m)
+                except Exception as e:
+                    print(f"worker {i}: impossible de charger {m}: {e}", flush=True)
+            else:
+                print(f"worker {i}: modèle {m} introuvable, ignoré", flush=True)
     rng = random.Random(args.seed * 1000 + i)
     env = ZeldaEnv(args.rom)
     steps = int(args.seconds * 60 / FRAMES_PER_ACTION)
@@ -132,15 +140,19 @@ def worker(i, args):
 
 
 def main():
+    default_archive = next((d for d in ["runs/horon/archive", "runs/goexplore/archive", "spawns"] if os.path.exists(d)), "spawns")
+    default_candidates = [m for m in ["runs/checkpoints-20m/model-best.pt", "runs/ppo-impala/model-best.pt", "models/ppo.pt"] if os.path.exists(m)]
+    default_models = [default_candidates[0]] if default_candidates else []
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="rom/oos.gbc")
     ap.add_argument("--start", default="states/horon-endgame.state")
-    ap.add_argument("--archive", default="spawns", help="dossier de cellules *.state.z où partir")
+    ap.add_argument("--archive", default=default_archive, help="dossier de cellules *.state.z où partir (défaut auto)")
     ap.add_argument("--cells-per-room", type=int, default=8)
     ap.add_argument("--out", default="/mnt/data/datasets/zelda")
-    ap.add_argument("--model", nargs="*", default=["models/ppo.pt", "models/ppo-kills.pt"],
-                    help="modèles PPO, tirés à parts égales (aucun : actions aléatoires seulement)")
-    ap.add_argument("--model-frac", type=float, default=0.7, help="part des parties jouées par le modèle")
+    ap.add_argument("--model", nargs="*", default=default_models,
+                    help="modèles PPO (défaut : meilleur modèle trouvé) ; aucun = 100%% aléatoire")
+    ap.add_argument("--model-frac", type=float, default=0.7, help="part des parties jouées par le modèle (70%% modèle, 30%% aléatoire)")
     ap.add_argument("--horon", type=float, default=0.1, help="part des parties qui partent de Horon")
     ap.add_argument("--warp", type=float, default=0.5,
                     help="part des parties téléportées sur des cartes aléatoires (Overworld, Subrosia, Donjons)")
