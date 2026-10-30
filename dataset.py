@@ -145,7 +145,7 @@ def worker(i, args):
 
 def main():
     default_archive = next((d for d in ["runs/horon/archive", "runs/goexplore/archive", "spawns"] if os.path.exists(d)), "spawns")
-    default_candidates = [m for m in ["runs/checkpoints-20m/model-best.pt", "runs/ppo-impala/model-best.pt", "models/ppo.pt"] if os.path.exists(m)]
+    default_candidates = [m for m in ["models/ppo.pt", "runs/checkpoints-20m/model.pt", "runs/ppo-impala/model.pt"] if os.path.exists(m)]
     default_models = [default_candidates[0]] if default_candidates else []
 
     ap = argparse.ArgumentParser()

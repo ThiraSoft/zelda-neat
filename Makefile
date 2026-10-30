@@ -49,7 +49,7 @@ DATASET_GB ?= 50
 # cœurs libres au lancement : nproc moins la charge moyenne sur 1 min, au moins 1
 DATASET_WORKERS ?= $(shell awk -v n=$$(nproc) '{w = n - int($$1 + 0.5); print (w < 1 ? 1 : w)}' /proc/loadavg)
 # modèles PPO, à parts égales dans les parties jouées par un modèle ; vide = tout au hasard
-DATASET_MODEL ?= $(firstword $(wildcard runs/checkpoints-20m/model-best.pt runs/ppo-impala/model-best.pt models/ppo.pt))
+DATASET_MODEL ?= $(firstword $(wildcard models/ppo.pt runs/checkpoints-20m/model.pt runs/ppo-impala/model.pt))
 # part des parties jouées par le modèle, le reste au hasard (70% modèle, 30% aléatoire)
 DATASET_MODEL_FRAC ?= 0.7
 # cellules de départ (8 par salle au plus, tirées de runs/horon/archive)
