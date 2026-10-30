@@ -8,7 +8,7 @@ import neat
 
 from . import ram
 from .archive import cell_key, read_state
-from .env import BUTTONS, ZeldaEnv, to_mask
+from .env import BUTTONS, EQUIP_A, EQUIP_B, ZeldaEnv, to_mask
 from .fitness import Tracker
 
 FRAMES_PER_ACTION = 4
@@ -44,6 +44,17 @@ def rollout(env, policy, state, render=False, max_frames=None, patience=None, kn
     max_frames = max_frames or MAX_FRAMES
     patience = patience or PATIENCE
     env.load(state)
+    # Calibrage : 4 coeurs max (16 quarts), 0 rubis, épée sur B, bouclier sur A, rafraîchissement HUD
+    m = env.pb.memory
+    m[ram.LINK_MAX_HEALTH] = min(env.mem[ram.LINK_MAX_HEALTH], 16)
+    m[ram.LINK_HEALTH] = min(env.mem[ram.LINK_HEALTH], 16)
+    m[ram.RUPEES] = 0
+    m[ram.RUPEES + 1] = 0
+    m[EQUIP_B] = 0x05
+    m[EQUIP_A] = 0x01
+    m[0xCBEA] = 0x09
+    for _ in range(15):
+        env.step(set(), 1, render)
     t = Tracker(env.mem, known or frozenset(), cell_key if known is not None else None)
     t.captured = {}
     actions = bytearray()

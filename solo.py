@@ -26,9 +26,16 @@ ap.add_argument("--random-location", nargs="?", const="spawns", metavar="DOSSIER
                 help="part d'une cellule tirée au hasard dans DOSSIER (défaut spawns), comme dataset.py")
 args = ap.parse_args()
 if args.random_location:
+    import glob
+    import os
     from dataset import room_capped
-    args.state = random.choice(room_capped(args.random_location, 8))
-    print("départ :", args.state, flush=True)
+    folder = args.random_location
+    if not os.path.exists(folder) or not glob.glob(os.path.join(folder, "*.state*")):
+        folder = "runs/horon/archive"
+    candidates = room_capped(folder, 8)
+    if candidates:
+        args.state = random.choice(candidates)
+        print("départ :", args.state, flush=True)
 
 # La fenêtre SDL s'ouvre avant de charger torch : dans l'autre ordre, elle reste noire (ROCm).
 env = ZeldaEnv(args.rom, window="SDL2" if args.window else "null", speed=1 if args.window else 0)
