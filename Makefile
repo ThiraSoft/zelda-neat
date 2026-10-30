@@ -52,6 +52,7 @@ DATASET_MODEL ?= models/ppo.pt models/ppo-kills.pt
 DATASET_MODEL_FRAC ?= 0.7
 # cellules de départ (8 par salle au plus, tirées de runs/horon/archive)
 DATASET_ARCHIVE ?= spawns
+DATASET_WARP ?= 0.5
 
 # pour make pull : user@serveur
 SERVER ?=
@@ -71,7 +72,7 @@ START = $(firstword $(wildcard $(STATES)))
 endif
 MAKE_DATASET = $(PPO_PY) dataset.py --archive $(DATASET_ARCHIVE) --out $(DATASET) --max-gb $(DATASET_GB) \
 	--workers $(DATASET_WORKERS) --start $(firstword $(wildcard $(STATES))) \
-	--model $(DATASET_MODEL) --model-frac $(DATASET_MODEL_FRAC)
+	--model $(DATASET_MODEL) --model-frac $(DATASET_MODEL_FRAC) --warp $(DATASET_WARP)
 PPO_RESUME = $(if $(wildcard $(PPO_RUN)/ckpt.pt),--resume,)
 PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword $(wildcard $(STATES))) \
 	--workers $(PPO_WORKERS) --envs-per-worker $(ENVS) --demos $(DEMOS) --horon $(HORON) --warp $(WARP) \

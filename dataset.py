@@ -42,7 +42,7 @@ def worker(i, args):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     from zneat import ram
     from zneat.archive import read_state
-    from zneat.env import ZeldaEnv, to_mask
+    from zneat.env import ZeldaEnv, to_mask, tile_value
     from zneat.runner import FRAMES_PER_ACTION, random_policy
 
     models = {}
@@ -58,18 +58,55 @@ def worker(i, args):
     while True:
         if folder_bytes(args.out) >= args.max_gb * 1e9:
             return
-        cells = room_capped(args.archive, args.cells_per_room)
-        if cells and rng.random() >= args.horon:
-            start = rng.choice(cells)
+
+        r = rng.random()
+        if r < args.horon:
+            start_label = "horon"
+            env.load(read_state(args.start))
+        elif r < args.horon + args.warp:
+            # Téléportation vers une carte aléatoire du monde entier (Overworld, Subrosia, Donjons)
+            env.load(read_state(args.start))
+            g = rng.choice([0, 0, 1, 4, 5])
+            room_id = rng.randint(0, 63 if g == 1 else 255)
+            env.pb.memory[0xCC63] = 0x80 | g
+            env.pb.memory[0xCC64] = room_id
+            env.pb.memory[0xCC66] = 0x45
+            env.pb.memory[0xCC67] = 0x01
+            env.pb.memory[ram.SEASON] = rng.randint(0, 3)
+            for _ in range(35):
+                env.step(set(), 1, False)
+
+            m = env.mem
+            coll = m[ram.ROOM_COLLISIONS:ram.ROOM_COLLISIONS + ram.ROOM_STRIDE * ram.ROOM_ROWS]
+            rows, cols = (11, 15) if m[ram.ROOM_IS_LARGE] else (8, 10)
+            free = [(y, x) for y in range(1, rows - 1) for x in range(1, cols - 1)
+                    if tile_value(coll[y * ram.ROOM_STRIDE + x]) == 0.0]
+            if free:
+                ty, tx = rng.choice(free)
+                env.pb.memory[ram.LINK + ram.OBJ_YH] = (ty << 4) + 8
+                env.pb.memory[ram.LINK + ram.OBJ_XH] = (tx << 4) + 8
+            start_label = f"warp-{g}-{room_id}"
         else:
-            start = args.start
+            cells = room_capped(args.archive, args.cells_per_room)
+            if cells:
+                cell_path = rng.choice(cells)
+                start_label = os.path.basename(cell_path)
+                env.load(read_state(cell_path))
+            else:
+                start_label = "horon"
+                env.load(read_state(args.start))
+
+        # Limite de survie à 4 coeurs et affichage des icônes d'objets dans le HUD
+        env.pb.memory[ram.LINK_MAX_HEALTH] = min(env.mem[ram.LINK_MAX_HEALTH], 16)
+        env.pb.memory[ram.LINK_HEALTH] = min(env.mem[ram.LINK_HEALTH], 16)
+        env.pb.memory[0xCBEA] = 0x01
+
         if models and rng.random() < args.model_frac:
             name = rng.choice(sorted(models))
             policy = torch_policy(models[name], seed=rng.getrandbits(31))
         else:
             name = "random"
             policy = random_policy(random.Random(rng.getrandbits(32)))
-        env.load(read_state(start))
         env.step(set(), 1, True)
         first = env.pb.screen.ndarray[:, :, :3].copy()
         frames = np.empty((steps, 144, 160, 3), np.uint8)
@@ -87,7 +124,7 @@ def worker(i, args):
             k = steps
         out = os.path.join(args.out, f"ep-{args.seed}-{i:02d}-{n:06d}.npz")
         np.savez_compressed(out + ".tmp.npz", frames=frames[:k], actions=actions[:k], first=first,
-                            start=os.path.basename(start), policy=name)
+                            start=start_label, policy=name)
         os.replace(out + ".tmp.npz", out)
         n += 1
 
@@ -103,6 +140,8 @@ def main():
                     help="modèles PPO, tirés à parts égales (aucun : actions aléatoires seulement)")
     ap.add_argument("--model-frac", type=float, default=0.7, help="part des parties jouées par le modèle")
     ap.add_argument("--horon", type=float, default=0.1, help="part des parties qui partent de Horon")
+    ap.add_argument("--warp", type=float, default=0.5,
+                    help="part des parties téléportées sur des cartes aléatoires (Overworld, Subrosia, Donjons)")
     ap.add_argument("--seconds", type=float, default=120, help="durée d'une partie")
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--max-gb", type=float, default=50)
