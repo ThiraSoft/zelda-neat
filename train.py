@@ -11,12 +11,15 @@ from multiprocessing import Pool
 import neat
 
 from zneat.archive import Archive, cell_key, key_str, read_state
-from zneat.env import NUM_INPUTS, ZeldaEnv
+from zneat.env import ZeldaEnv
+from zneat.obs import NEAT_INPUTS
 from zneat.runner import indexed_job, init_worker, job as run_job, solo_line, solo_score
 
 KEEP_CHECKPOINTS = 5
 RESTART_FRESH = 0.3      # part de génomes neufs après un plateau
 RESTART_PARENTS = 5      # derniers découvreurs du hall utilisés comme parents
+RACE_KEEP = 0.25         # part des génomes qui jouent la seconde moitié des départs (--warp)
+EVAL_TOP = 3             # génomes passés à l'évaluation commune toutes les --eval-every générations
 
 
 class Prune(neat.reporting.BaseReporter):
@@ -34,9 +37,12 @@ class Explorer:
     pendant que les dernières parties NEAT finissent."""
 
     def __init__(self, pool, archive, run, starts, random_trials, random_frames,
-                 solo_state=None, solo_every=5, solo_seconds=600, spawns=None):
+                 solo_state=None, solo_every=5, solo_seconds=600, warp=False, rom=None, eval_every=5):
         self.pool = pool
-        self.spawns = spawns
+        self.warp = warp
+        self.rom = rom
+        self.eval_every = eval_every
+        self.warp_env = None
         self.solo_state = solo_state
         self.solo_every = solo_every
         self.solo_seconds = solo_seconds
@@ -56,8 +62,8 @@ class Explorer:
             self.kills = json.load(open(self.kills_path))
 
     def evaluate(self, genomes, config):
-        if self.spawns:
-            return self.evaluate_spawns(genomes, config)
+        if self.warp:
+            return self.evaluate_warp(genomes, config)
         kp = self.archive.known_path
         starts = [(k, self.archive.path(k)) for k in self.archive.choose(self.starts, self.rng)]
         jobs = [("neat", kp, g, config, starts) for _, g in genomes]
@@ -93,28 +99,84 @@ class Explorer:
         self.generation += 1
         return found["neat"]
 
-    def evaluate_spawns(self, genomes, config):
-        """Score solo : chaque génome joue seul depuis les mêmes départs, tirés au hasard dans les
-        spawns à chaque génération. Fitness = ce qu'il a fait lui-même (salles, types d'ennemis
-        tués, histoire, mort), sans archive ni parties aléatoires."""
-        starts = [(None, p) for p in self.rng.sample(self.spawns, self.starts)]
-        jobs = [("neat", None, g, config, starts) for _, g in genomes]
-        kills, kinds = 0, set(self.kills["kinds"])
-        for i, (fit, _, k, killed) in self.pool.imap_unordered(indexed_job, enumerate(jobs)):
-            genomes[i][1].fitness = fit
-            kills += k
-            kinds |= killed
-        self.kills["neat"] += kills
-        self.kills["kinds"] = sorted(kinds)
+    def warp_starts(self, n):
+        """n départs téléportés au hasard (comme le PPO et l'éval), écrits dans RUN/starts pour les workers."""
+        from zneat.env import warp_random
+        if self.warp_env is None:
+            self.warp_env = ZeldaEnv(self.rom)
+            self.warp_seed = read_state(self.solo_state)
+        d = os.path.join(self.run, "starts")
+        os.makedirs(d, exist_ok=True)
+        paths = []
+        for i in range(n):
+            self.warp_env.load(self.warp_seed)
+            warp_random(self.warp_env, self.rng)
+            p = os.path.join(d, f"g{self.generation % 4}-{i}.state.z")
+            with open(p, "wb") as f:
+                f.write(zlib.compress(self.warp_env.save(), 1))
+            paths.append(p)
+        return paths
+
+    def play_all(self, pairs, scores, totals):
+        """Joue chaque (génome, départ) dans le pool, cumule fitness, kills et types."""
+        jobs = [("game", None, g, p) for g, p in pairs]
+        for i, (fit, kills, kinds) in self.pool.imap_unordered(indexed_job, enumerate(jobs), chunksize=4):
+            scores[pairs[i][0].key].append(fit)
+            totals["kills"] += kills
+            totals["kinds"] |= kinds
+
+    def evaluate_warp(self, genomes, config):
+        """Score solo sur des départs téléportés, les mêmes pour tous les génomes d'une génération.
+        Course en deux manches : tous jouent la moitié des départs, seuls les RACE_KEEP meilleurs jouent
+        l'autre moitié. La fitness est la moyenne des parties jouées : un génome chanceux à la première
+        manche redescend à la seconde, et le temps de calcul va aux génomes qui comptent."""
+        starts = self.warp_starts(self.starts)
+        half = max(1, len(starts) // 2)
+        scores = {k: [] for k, _ in genomes}
+        totals = {"kills": 0, "kinds": set(self.kills["kinds"])}
+        self.play_all([(g, p) for _, g in genomes for p in starts[:half]], scores, totals)
+        mean = lambda k: sum(scores[k]) / len(scores[k])  # noqa: E731
+        ranked = sorted((g for _, g in genomes), key=lambda g: mean(g.key), reverse=True)
+        finalists = ranked[:max(1, int(len(ranked) * RACE_KEEP))]
+        self.play_all([(g, p) for g in finalists for p in starts[half:]], scores, totals)
+        for _, g in genomes:
+            g.fitness = mean(g.key)
+        self.kills["neat"] += totals["kills"]
+        self.kills["kinds"] = sorted(totals["kinds"])
         json.dump(self.kills, open(self.kills_path, "w"))
-        best = max((g for _, g in genomes), key=lambda g: g.fitness)
+        finalists.sort(key=lambda g: g.fitness, reverse=True)
         with open(os.path.join(self.run, "best.pkl"), "wb") as f:
-            pickle.dump(best, f)
-        print(f"départs : {', '.join(os.path.basename(p) for _, p in starts)} | "
-              f"fitness max {best.fitness:.0f} | kills {kills}, {len(kinds)} types au total")
-        self.solo(genomes, config)
+            pickle.dump(finalists[0], f)
+        print(f"génération {self.generation} : fitness max {finalists[0].fitness:.0f} "
+              f"(sur {len(starts)} départs, {len(finalists)} finalistes) | kills {totals['kills']}, "
+              f"{len(totals['kinds'])} types au total")
+        if self.eval_every and self.generation % self.eval_every == 0:
+            self.evaluate_best(finalists[:EVAL_TOP])
         self.generation += 1
         return 0
+
+    def evaluate_best(self, candidates):
+        """Les meilleurs génomes passent l'évaluation commune avec le PPO (zneat/evaluate.py, 30 parties
+        téléportées à graines fixes). Le meilleur à ce score est gardé dans RUN/best-eval.pkl."""
+        from zneat.evaluate import EVAL_GAMES, EVAL_SECONDS, eval_score, summarize
+        jobs = [("eval", None, g, i, EVAL_SECONDS) for g in candidates for i in range(EVAL_GAMES)]
+        games = [[] for _ in candidates]
+        for i, c in self.pool.imap_unordered(indexed_job, enumerate(jobs)):
+            games[i // EVAL_GAMES].append(c)
+        path = os.path.join(self.run, "eval-best.json")
+        best = json.load(open(path))["score"] if os.path.exists(path) else -1
+        for g, gs in zip(candidates, games):
+            res = summarize(gs)
+            score, mark = eval_score(res), ""
+            if score > best:
+                best, mark = score, ", nouveau meilleur"
+                with open(os.path.join(self.run, "best-eval.pkl"), "wb") as f:
+                    pickle.dump(g, f)
+                json.dump({"score": score, "generation": self.generation, "fitness": g.fitness, "eval": res},
+                          open(path, "w"), ensure_ascii=False, indent=1)
+            print(f"éval : salles {res['salles']:.2f} (max {res['salles_max']}), types {res['types']:.2f}, "
+                  f"kills {res['kills']:.2f}, morts {res['morts_pct']:.0f} %, score {score:.2f} "
+                  f"(génération {self.generation}, fitness {g.fitness:.0f}{mark})")
 
     def solo(self, genomes, config):
         """Toutes les solo_every générations, le meilleur génome joue seul depuis le départ,
@@ -206,19 +268,20 @@ def main():
     ap.add_argument("--solo-every", type=int, default=5,
                     help="le meilleur génome joue seul depuis le premier state toutes les N générations (0 = jamais)")
     ap.add_argument("--solo-seconds", type=float, default=600, help="durée de la partie solo")
-    ap.add_argument("--spawns", default=None,
-                    help="dossier de cellules : départs tirés au hasard à chaque génération (8 par salle "
-                         "au plus) et score solo, sans archive ni parties aléatoires")
+    ap.add_argument("--warp", action="store_true",
+                    help="départs téléportés au hasard à chaque génération (--starts), score solo, "
+                         "sans archive ni parties aléatoires, évaluation commune avec le PPO")
+    ap.add_argument("--eval-every", type=int, default=5, help="avec --warp : évaluation commune toutes les N générations")
     ap.add_argument("--resume", nargs="?", const="latest",
                     help="checkpoint à reprendre (sans valeur : le plus récent du run)")
     args = ap.parse_args()
 
     os.makedirs(args.run, exist_ok=True)
     prefix = os.path.join(args.run, "ckpt-")
-    archive = Archive(os.path.join(args.run, "archive"))
-    if not os.path.exists(archive.known_path):
+    archive = None if args.warp else Archive(os.path.join(args.run, "archive"))
+    if archive is not None and not os.path.exists(archive.known_path):
         archive.save()
-    if not len(archive):
+    if archive is not None and not len(archive):
         states = sorted(glob.glob(args.states))
         if not states:
             raise SystemExit(f"aucun save state dans {args.states} (lance make_state.py)")
@@ -226,7 +289,7 @@ def main():
 
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
                          neat.DefaultSpeciesSet, neat.DefaultStagnation, args.config)
-    assert config.genome_config.num_inputs == NUM_INPUTS, NUM_INPUTS
+    assert config.genome_config.num_inputs == NEAT_INPUTS, NEAT_INPUTS
 
     if args.resume:
         path = args.resume
@@ -247,18 +310,15 @@ def main():
     pop.add_reporter(ckpt)
     pop.add_reporter(Prune(prefix))
 
-    pool = Pool(args.workers, initializer=init_worker,
-                initargs=(args.rom, (), args.max_seconds, args.patience))
     solo_state = (sorted(glob.glob(args.states)) or [None])[0]
-    spawns = None
-    if args.spawns:
-        from dataset import room_capped
-        spawns = room_capped(args.spawns, 8)
+    pool = Pool(args.workers, initializer=init_worker,
+                initargs=(args.rom, [solo_state] if args.warp else (), args.max_seconds, args.patience, args.config))
+    if args.warp:
         args.plateau = 0   # pas de salle nouvelle à attendre en score solo
-        print(f"départs au hasard dans {len(spawns)} cellules de {args.spawns}, score solo")
+        print(f"départs téléportés au hasard, {args.starts} par génération, score solo")
     explorer = Explorer(pool, archive, args.run, args.starts, args.random_trials,
                         int(args.random_seconds * 60), solo_state, args.solo_every, args.solo_seconds,
-                        spawns)
+                        args.warp, args.rom, args.eval_every)
     explorer.generation = pop.generation
     try:
         last_gen, done = pop.generation, 0

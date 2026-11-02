@@ -19,6 +19,48 @@ MARKS = 8 + 2 + 8 + 2 + 4 + TIME_INPUTS
 PPO_INPUTS = NUM_INPUTS + MARKS + ROOM_GRID
 
 
+def room_marks(m, visited, out):
+    """Position de Link dans la salle (2) puis, pour les 4 salles voisines (haut, bas, gauche, droite),
+    1 si déjà vue pendant l'épisode (4). Écrit dans out[0:6]."""
+    group, room = m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM]
+    rows, cols = (11, 15) if m[ram.ROOM_IS_LARGE] else (8, 10)
+    out[0] = min(1.0, m[ram.LINK + ram.OBJ_YH] / (16 * rows))
+    out[1] = min(1.0, m[ram.LINK + ram.OBJ_XH] / (16 * cols))
+    for i, d in enumerate((-16, 16, -1, 1)):
+        n = room + d
+        if 0 <= n < 256 and (d in (-16, 16) or n >> 4 == room >> 4):
+            out[2 + i] = 1.0 if (group, n) in visited else 0.0
+
+
+# Entrées de NEAT : celles d'env.observe, puis room_marks et le temps passé dans la salle (1 = 10 s).
+NEAT_INPUTS = NUM_INPUTS + 7
+NEAT_ROOM_STEPS = 50
+
+
+class NeatObserver:
+    """Mémoire minimale d'un génome NEAT (réseau sans état) : salles vues et temps dans la salle.
+    Un par partie, voir new_game."""
+
+    def __init__(self):
+        self.new_game()
+
+    def new_game(self):
+        self.visited, self.room, self.steps = set(), None, 0
+
+    def __call__(self, env):
+        m = env.mem
+        room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM])
+        if room != self.room:
+            self.room, self.steps = room, 0
+        else:
+            self.steps += 1
+        self.visited.add(room)
+        x = np.zeros(7, dtype=np.float32)
+        room_marks(m, self.visited, x)
+        x[6] = min(1.0, self.steps / NEAT_ROOM_STEPS)
+        return np.concatenate((env.observe(), x))
+
+
 class Observer:
     """Observation du PPO : celle de NEAT (env.observe) plus de quoi savoir où on est.
     Groupe (one-hot 8), salle en coordonnées (y, x sur la grille 16x16 du groupe) et en 8 bits,
@@ -34,17 +76,11 @@ class Observer:
         m = env.mem
         group, room = m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM]
         self.visited.add((group, room))
-        rows, cols = (11, 15) if m[ram.ROOM_IS_LARGE] else (8, 10)
         x = np.zeros(MARKS, dtype=np.float32)
         x[min(group, 7)] = 1.0
         x[8], x[9] = (room >> 4) / 15, (room & 15) / 15
         x[10:18] = [(room >> i) & 1 for i in range(8)]
-        x[18] = min(1.0, m[ram.LINK + ram.OBJ_YH] / (16 * rows))
-        x[19] = min(1.0, m[ram.LINK + ram.OBJ_XH] / (16 * cols))
-        for i, d in enumerate((-16, 16, -1, 1)):   # haut, bas, gauche, droite
-            n = room + d
-            if 0 <= n < 256 and (d in (-16, 16) or n >> 4 == room >> 4):
-                x[20 + i] = 1.0 if (group, n) in self.visited else 0.0
+        room_marks(m, self.visited, x[18:24])
         t = self.step
         for i, p in enumerate(TIME_PERIODS):
             w = 2.0 * np.pi * t / p

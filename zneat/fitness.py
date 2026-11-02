@@ -5,8 +5,9 @@ W_ROOM = 100.0   # salle (groupe, salle) visitée, la saison ne compte pas
 W_VARIANT = 10.0 # même salle dans une autre saison : peu, sinon changer de saison sur place rapporte
 W_TILE = 0.0    # les cases ne comptent pas, seules les salles comptent (elles servent à la patience)
 W_ENEMY_KIND = 100.0  # autant qu'une salle : les types d'ennemis tués comptent dans le score
+W_ROOM_KILL = 40.0    # type d'ennemi tué pour la première fois dans cette salle : un re-kill ne rapporte rien
 W_STORY = 100.0
-W_DEATH = -20.0
+W_DEATH = -100.0     # autant qu'une salle : à -20, mourir ne coûtait presque rien
 
 
 def story_bits(m):
@@ -36,6 +37,8 @@ class Tracker:
         self.tiles = set()
         self.kinds = set()
         self.kills = 0
+        self.room_kills = set()   # (groupe, salle, type) tués
+        self.progress = False     # salle, type tué dans la salle ou histoire nouveaux au dernier pas
         self.story0 = story_bits(m)
         self.story = 0
         self.frames = 0
@@ -48,7 +51,7 @@ class Tracker:
         """Renvoie True si quelque chose de nouveau a été obtenu."""
         self.frames += frames
         self.last_kills = []   # type de chaque ennemi tué pendant ce pas
-        new = False
+        new = progress = False
 
         room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM], m[ram.SEASON])
         if room != self.last_room:
@@ -57,7 +60,7 @@ class Tracker:
             self.last_room = room
         if room not in self.rooms:
             self.rooms.add(room)
-            new = True
+            new = progress = True
 
         if self.cell_fn:
             self.cell = self.cell_fn(m)
@@ -77,6 +80,9 @@ class Tracker:
             if prev_hp > 0 and cur[0] == prev_id and cur[1] == 0:
                 self.kills += 1
                 self.last_kills.append(prev_id)
+                if (room[0], room[1], prev_id) not in self.room_kills:
+                    self.room_kills.add((room[0], room[1], prev_id))
+                    progress = True
                 if prev_id not in self.kinds:
                     self.kinds.add(prev_id)
                     new = True
@@ -85,10 +91,11 @@ class Tracker:
         story = story_bits(m) - self.story0
         if story > self.story:
             self.story = story
-            new = True
+            new = progress = True
 
         if m[ram.LINK_HEALTH] == 0:
             self.dead = True
+        self.progress = progress
         return new
 
     def fitness(self):
@@ -99,5 +106,6 @@ class Tracker:
                 + W_VARIANT * (len(self.rooms) - len(maps))
                 + W_TILE * len(self.tiles)
                 + W_ENEMY_KIND * len(self.kinds)
+                + W_ROOM_KILL * len(self.room_kills)
                 + W_STORY * self.story
                 + (W_DEATH if self.dead else 0.0))

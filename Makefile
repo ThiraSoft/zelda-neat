@@ -85,13 +85,14 @@ PPO = $(PPO_PY) ppo.py --archive $(ARCHIVE) --run $(PPO_RUN) --start $(firstword
 	--bc-coef $(BC_COEF) --bc-burst $(BC_BURST) $(PPO_ARGS)
 # Reprise automatique si le run a déjà un checkpoint, sinon nouveau run.
 RESUME = $(if $(wildcard $(RUN)/ckpt-*),--resume,)
-# NEAT en score solo depuis des cellules au hasard (make neat-spawns-start)
-NEAT_RUN ?= runs/neat-spawns
-NEAT_STARTS ?= 5
-NEAT_UNIT = zelda-neat-spawns
-NEAT_SPAWNS = $(PY) train.py --run $(NEAT_RUN) --states $(STATES) --spawns $(DATASET_ARCHIVE) \
-	--workers $(WORKERS) --starts $(NEAT_STARTS) --max-seconds $(MAX_SECONDS) --patience $(PATIENCE) \
-	--solo-every $(SOLO_EVERY) --solo-seconds $(SOLO_SECONDS) $(if $(wildcard $(NEAT_RUN)/ckpt-*),--resume,) $(ARGS)
+# NEAT en score solo depuis des départs téléportés, comme le PPO (make neat-warp-start)
+NEAT_RUN ?= runs/neat
+NEAT_STARTS ?= 8
+NEAT_PATIENCE ?= 20
+NEAT_UNIT = zelda-neat-warp
+NEAT_WARP = $(PY) train.py --run $(NEAT_RUN) --states $(STATES) --warp \
+	--workers $(WORKERS) --starts $(NEAT_STARTS) --max-seconds $(MAX_SECONDS) --patience $(NEAT_PATIENCE) \
+	$(if $(wildcard $(NEAT_RUN)/ckpt-*),--resume,) $(ARGS)
 # Exploration Go-Explore par parties aléatoires (make start). NEAT reste disponible : make neat.
 EXPLORE = $(PY) explore.py --run $(RUN) --states $(STATES) --workers $(WORKERS) \
 	--trials $(RANDOM_TRIALS) --seconds $(RANDOM_SECONDS) --patience $(PATIENCE) $(ARGS)
@@ -100,7 +101,7 @@ TRAIN = $(PY) train.py --run $(RUN) --states $(STATES) --workers $(WORKERS) \
 	--random-seconds $(RANDOM_SECONDS) --solo-every $(SOLO_EVERY) --solo-seconds $(SOLO_SECONDS) $(if $(strip $(GENERATIONS)),--generations $(GENERATIONS),) $(ARGS)
 
 .PHONY: help install bench run neat start start-tmux stop status log replay compare reset package vault pull \
-	solo paths paths-check install-ppo ppo ppo-start ppo-stop ppo-log ppo-solo ppo-replay ppo-reset record dataset dataset-start dataset-stop neat-spawns neat-spawns-start neat-spawns-stop neat-spawns-log
+	solo paths paths-check install-ppo ppo ppo-start ppo-stop ppo-log ppo-solo ppo-replay ppo-reset record dataset dataset-start dataset-stop neat-warp neat-warp-start neat-warp-stop neat-warp-log
 
 help:
 	@echo "make install      crée .venv"
@@ -132,8 +133,8 @@ help:
 	@echo "make ppo-watch    regarde MODEL jouer en direct dans le terminal (compatible neonmux/PWA)"
 	@echo "make ppo-reset    efface PPO_RUN (demande CONFIRM=oui)"
 	@echo "make record       joue et enregistre une démonstration humaine pour l'imitation (fenêtre SDL)"
-	@echo "make neat-spawns-start / -stop / -log   NEAT en score solo, départs au hasard dans spawns/, run NEAT_RUN"
-	@echo "                  meilleur génome solo dans NEAT_RUN/best-solo.pkl (make compare GENOME=...)"
+	@echo "make neat-warp-start / -stop / -log   NEAT en score solo, départs téléportés, run NEAT_RUN"
+	@echo "                  meilleur génome à l'éval commune avec le PPO dans NEAT_RUN/best-eval.pkl"
 	@echo "make dataset      enregistre des parties (écran + boutons) dans DATASET jusqu'à DATASET_GB Go"
 	@echo "make dataset-start / dataset-stop   pareil en tâche de fond"
 	@echo "variables : WORKERS RANDOM_TRIALS RUN STATES MAX_SECONDS PATIENCE RANDOM_SECONDS GENERATIONS ARGS"
@@ -279,24 +280,24 @@ ppo-reset:
 	rm -rf $(PPO_RUN)
 	@echo "$(PPO_RUN) effacé"
 
-neat-spawns:
-	$(NEAT_SPAWNS)
+neat-warp:
+	$(NEAT_WARP)
 
-neat-spawns-start:
+neat-warp-start:
 	-systemctl --user reset-failed $(NEAT_UNIT) 2>/dev/null
 	mkdir -p $(NEAT_RUN)
 	systemd-run --user --unit $(NEAT_UNIT) --working-directory=$(CURDIR) --setenv=PYTHONUNBUFFERED=1 \
-	  sh -c 'exec $(NEAT_SPAWNS) >> $(NEAT_RUN)/train.log 2>&1'
-	@echo "NEAT lancé dans $(NEAT_RUN) : départs au hasard, score solo, $(WORKERS) workers"
+	  sh -c 'exec $(NEAT_WARP) >> $(NEAT_RUN)/train.log 2>&1'
+	@echo "NEAT lancé dans $(NEAT_RUN) : départs téléportés, score solo, $(WORKERS) workers"
 
-neat-spawns-stop:
+neat-warp-stop:
 	@if systemctl --user is-active -q $(NEAT_UNIT) 2>/dev/null; then \
 	  systemctl --user kill -s INT $(NEAT_UNIT); \
 	  while systemctl --user is-active -q $(NEAT_UNIT); do sleep 1; done; echo arrêté; \
-	else echo "NEAT spawns ne tourne pas"; fi
+	else echo "NEAT ne tourne pas"; fi
 
-neat-spawns-log:
-	tail -f $(NEAT_RUN)/train.log | grep --line-buffered -E "^départs|^solo|Running generation|Traceback"
+neat-warp-log:
+	tail -f $(NEAT_RUN)/train.log | grep --line-buffered -E "^génération|^éval|Traceback"
 
 dataset:
 	$(MAKE_DATASET)

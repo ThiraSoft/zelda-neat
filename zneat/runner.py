@@ -10,10 +10,11 @@ from . import ram
 from .archive import cell_key, read_state
 from .env import BUTTONS, EQUIP_A, EQUIP_B, ZeldaEnv, to_mask, warp_random
 from .fitness import Tracker
+from .obs import NeatObserver
 
 FRAMES_PER_ACTION = 12     # 5 décisions par seconde
 MAX_FRAMES = 2 * 60 * 60   # 2 minutes de jeu par save state
-PATIENCE = 15 * 60         # arrêt si rien de nouveau pendant 15 s
+PATIENCE = 15 * 60         # arrêt si rien de nouveau pendant 15 s (voir strict dans rollout)
 
 # Exploration aléatoire façon Go-Explore : une action tirée au hasard est répétée
 # tant qu'un tirage reste sous STICKY (en moyenne 40 frames à 0.7, soit 3,3 pas de 12 frames).
@@ -23,6 +24,8 @@ STICKY = 0.7
 
 _env = None
 _states = None
+_config = None
+_cache = {}    # chemin -> state lu, pour les départs d'une génération (vidé quand il grossit)
 _known = (None, frozenset())   # (mtime de known.pkl, clés) : rechargé quand l'archive change
 
 
@@ -37,10 +40,15 @@ def busy(m):
     return m[ram.TEXT_ACTIVE] or m[ram.DISABLED_OBJECTS] & 0x81
 
 
-def rollout(env, policy, state, render=False, max_frames=None, patience=None, known=None, on_step=None, warp=False, rng=None):
+def rollout(env, policy, state, render=False, max_frames=None, patience=None, known=None, on_step=None, warp=False, rng=None,
+            strict=False):
     """Joue une partie avec policy(obs) -> boutons. Avec `known` (clés de l'archive),
     t.captured reçoit par cellule nouvelle (state compressé, inputs depuis le départ), pris
-    quand Link est contrôlable. Un input = un octet (voir env.to_mask) tenu FRAMES_PER_ACTION frames."""
+    quand Link est contrôlable. Un input = un octet (voir env.to_mask) tenu FRAMES_PER_ACTION frames.
+    strict : la patience ne repart que sur une salle, un type tué dans la salle ou de l'histoire
+    (comme le PPO), pas sur une case nouvelle. Une politique qui a new_game() est remise à zéro."""
+    if hasattr(policy, "new_game"):
+        policy.new_game()
     max_frames = max_frames or MAX_FRAMES
     patience = patience or PATIENCE
     env.load(state)
@@ -66,7 +74,8 @@ def rollout(env, policy, state, render=False, max_frames=None, patience=None, kn
         if not env.step(buttons, FRAMES_PER_ACTION, render):
             break
         m = env.mem
-        if t.update(m, FRAMES_PER_ACTION):
+        new = t.update(m, FRAMES_PER_ACTION)
+        if t.progress if strict else new:
             idle = 0
         elif not busy(m):
             idle += FRAMES_PER_ACTION
@@ -79,10 +88,20 @@ def rollout(env, policy, state, render=False, max_frames=None, patience=None, kn
     return t
 
 
-def net_policy(net):
-    if hasattr(net, "reset"):
-        net.reset()
-    return lambda env: {b for b, v in zip(BUTTONS, net.activate(env.observe())) if v > 0.5}
+class net_policy:
+    """Joueur NEAT : 6 sorties (haut, bas, gauche, droite, A, B), bouton tenu au-dessus de 0,5."""
+
+    def __init__(self, net):
+        self.net = net
+        self.observer = NeatObserver()
+
+    def new_game(self):
+        if hasattr(self.net, "reset"):
+            self.net.reset()
+        self.observer.new_game()
+
+    def __call__(self, env):
+        return {b for b, v in zip(BUTTONS, self.net.activate(self.observer(env))) if v > 0.5}
 
 
 def random_policy(rng):
@@ -118,8 +137,11 @@ def solo_line(t):
             f"{t.frames / 60:.0f} s{' (mort)' if t.dead else ''}")
 
 
-def init_worker(rom, state_paths=(), max_seconds=None, patience_seconds=None):
-    global _env, _states, MAX_FRAMES, PATIENCE
+def init_worker(rom, state_paths=(), max_seconds=None, patience_seconds=None, config_path=None):
+    global _env, _states, _config, MAX_FRAMES, PATIENCE
+    if config_path:
+        _config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                              neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
     if max_seconds:
         MAX_FRAMES = int(max_seconds * 60)
     if patience_seconds:
@@ -150,6 +172,20 @@ def job(args):
     Les deux renvoient aussi (kills, types d'ennemis tués).
     ("solo", genome, config, state, secondes) -> Tracker de la partie solo, voir solo()."""
     kind, known_path = args[0], args[1]
+    if kind == "game":
+        # Un génome, un départ téléporté (state sur disque) : (fitness, kills, types tués), patience stricte.
+        genome, path = args[2:]
+        if path not in _cache:
+            if len(_cache) > 64:
+                _cache.clear()
+            _cache[path] = read_state(path)
+        t = play(_env, make_net(genome, _config), _cache[path], strict=True)
+        return t.fitness(), t.kills, t.kinds
+    if kind == "eval":
+        # Une partie de l'évaluation commune (zneat/evaluate.py) depuis _states[0].
+        from .evaluate import eval_game
+        genome, g, seconds = args[2:]
+        return eval_game(_env, net_policy(make_net(genome, _config)), _states[0], g, seconds)
     if kind == "solo":
         genome, config, path, seconds = args[2:]
         t = solo(_env, net_policy(make_net(genome, config)), read_state(path), seconds)

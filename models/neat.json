@@ -1,0 +1,23 @@
+{
+ "run": "neat",
+ "generation": 55,
+ "fitness": 217.5,
+ "eval": {
+  "games": 30,
+  "salles": 2.0,
+  "salles_max": 7,
+  "types": 0.1,
+  "kills": 0.1,
+  "kills_par_type": 1.0,
+  "morts_pct": 36.666666666666664,
+  "duree_s": 88.60666666666665,
+  "menu_pct": 0.0,
+  "dialogue_pct": 4.747573546008577,
+  "items_changes": 0,
+  "actions_pct": {
+   "b+down+right": 89.9,
+   "down+right": 10.1
+  }
+ },
+ "date": "2026-11-02"
+}

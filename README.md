@@ -27,14 +27,14 @@ Toutes les commandes passent par `make` (`make help` les liste) :
     make bench                   # mesure le bon nombre de workers
     make start                   # explore par parties aléatoires en tâche de fond (Go-Explore, remplit l'archive)
     make neat                    # ancien entraînement NEAT, au premier plan
-    make neat-spawns-start       # NEAT en score solo, départs au hasard dans spawns/ (run runs/neat-spawns)
-    make neat-spawns-stop / neat-spawns-log
+    make neat-warp-start         # NEAT en score solo, départs téléportés comme le PPO (run runs/neat)
+    make neat-warp-stop / neat-warp-log
     make start-tmux              # pareil dans une session tmux "neat", sans systemd
     make run                     # pareil au premier plan, Ctrl+C sauve un checkpoint
     make stop                    # arrêt propre avec checkpoint (systemd ou tmux)
     make status                  # génération, salles, kills, plateaux, erreurs
     make log                     # suit la progression
-    make replay                  # un génome NEAT (GENOME=..., plus fourni dans le dépôt) joue depuis Horon, en fenêtre
+    make replay                  # le génome NEAT du dépôt (models/neat.pkl) joue depuis Horon, en fenêtre
     make compare                 # NEAT et PPO jouent en même temps depuis Horon, deux fenêtres (COMPARE_SECONDS=120)
     make ppo-replay RANDOM_LOCATION=1   # départ dans une cellule de spawns/ au hasard (aussi replay, compare, ppo-solo)
     make reset CONFIRM=oui       # efface le run, le prochain start repart de zéro
@@ -186,17 +186,24 @@ Dans `PPO_RUN/` : `model.pt` (le réseau), `ckpt.pt` (optimiseur et curriculum, 
 
 ## NEAT en score solo
 
-`make neat-spawns-start` lance `train.py --spawns spawns` dans `runs/neat-spawns`. À chaque génération, `NEAT_STARTS` cellules (5) sont tirées au hasard dans `spawns/`, et tous les génomes jouent seuls depuis ces mêmes départs, 2 min au plus, arrêt après 15 s sans rien de nouveau. La fitness ne compte que ce que le génome a fait lui-même : 100 par salle, 100 par type d'ennemi tué, 100 par flag d'histoire, 10 par salle déjà vue dans une autre saison, -20 s'il meurt. Il n'y a ni archive commune, ni bonus de nouveauté, ni parties aléatoires.
+`make neat-warp-start` lance `train.py --warp` dans `runs/neat`. À chaque génération, `NEAT_STARTS` départs (8) sont téléportés au hasard, comme pour le PPO, et tous les génomes jouent seuls depuis ces mêmes départs, 2 min au plus. La partie s'arrête après 20 s sans salle nouvelle, sans type d'ennemi tué pour la première fois dans la salle et sans histoire.
 
-Toutes les 5 générations, le meilleur génome joue 10 min seul depuis Horon (ligne `solo :`). Le meilleur à ce test est gardé dans `runs/neat-spawns/best-solo.pkl` (score dans `solo-best.json`). Pour le comparer au PPO :
+Fitness : 100 par salle, 100 par type d'ennemi tué, 40 par type tué pour la première fois dans une salle, 100 par flag d'histoire, 10 par salle déjà vue dans une autre saison, -100 s'il meurt.
 
-    make compare GENOME=runs/neat-spawns/best-solo.pkl
-    make compare GENOME=runs/neat-spawns/best-solo.pkl RANDOM_LOCATION=1
+Le réseau reçoit la grille 9x9 autour de Link (`env.observe`) et 7 entrées de mémoire : position dans la salle, les 4 salles voisines déjà vues ou non, temps passé dans la salle (`NeatObserver`).
+
+Les générations se jouent en deux manches. Tous les génomes jouent la moitié des départs, puis seul le meilleur quart joue l'autre moitié. La fitness est la moyenne des parties jouées.
+
+Toutes les 5 générations, les 3 meilleurs génomes passent l'évaluation commune avec le PPO (`zneat/evaluate.py`, 30 parties téléportées à graines fixes, ligne `éval :`). Le meilleur à ce score (salles + types par partie) est gardé dans `runs/neat/best-eval.pkl`, ses chiffres dans `eval-best.json`. `scripts/eval_model.py` donne les mêmes chiffres pour un `.pt` ou un `.pkl` :
+
+    scripts/eval_model.py models/ppo.pt
+    make compare GENOME=runs/neat/best-eval.pkl
 
 ## Dataset world model
 
 Le dépôt contient ce qu'il faut pour générer le dataset sans rien réentraîner :
-- `models/ppo.pt` : le modèle officiel, seul modèle du dépôt. Joueur PPO (CNN Impala sur l'écran en moyenne 2x2 + grille de la salle + LSTM), 12 frames par action, 20 M pas (run `iter2`). Sur 30 parties de 2 min téléportées au hasard : 5,3 salles (max 24), 0,9 kill, 17 % de morts, 1,4 % du temps dans le menu. Détails dans `models/ppo.json`.
+- `models/ppo.pt` : le modèle officiel, celui du dataset. Joueur PPO (CNN Impala sur l'écran en moyenne 2x2 + grille de la salle + LSTM), 12 frames par action, 20 M pas (run `iter2`). Sur 30 parties de 2 min téléportées au hasard : 5,3 salles (max 24), 0,9 kill, 17 % de morts, 1,4 % du temps dans le menu. Détails dans `models/ppo.json`.
+- `models/neat.pkl` : le meilleur génome NEAT (run `runs/neat`, génération 55), pour comparer avec `make compare`. Même éval : 2,0 salles (max 7), 0,1 kill, 37 % de morts. Il ne sert pas au dataset. Détails dans `models/neat.json`.
 - `spawns/` : 1 054 points de départ (states PyBoy compressés), au plus 8 par salle, sur 134 salles, tirés de l'archive Go-Explore `runs/horon/archive`.
 - `states/horon-endgame.state` : Horon avec l'inventaire de fin de jeu.
 
