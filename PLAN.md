@@ -4,7 +4,7 @@ Pour reprendre dans une autre conversation : lire ce fichier, puis README.md et 
 
 ## But
 
-Un seul modèle joueur qui part de Horon (`states/horon-endgame.state`) et va le plus loin possible tout seul, puis un dataset (frames + inputs) pour entraîner un world model.
+Produire du gameplay automatisé pour un dataset (frames + inputs) qui entraînera un world model. Le joueur PPO sert à ça : il doit jouer de façon variée partout dans le monde, pas réussir une course depuis Horon.
 
 Ce qui compte : des salles différentes ("maps"), pas des cases. Score solo = salles (groupe, salle) visitées en 10 min depuis Horon + types d'ennemis tués. La saison compte très peu (sinon changer de saison sur place rapporte).
 
@@ -41,3 +41,7 @@ Pas lancé : le dataset (les cœurs sont pris).
 - Le venv ROCm (`/mnt/data/dev/trainvenv-rocm`, Python 3.14) a pyboy et neat-python installés. Sur le serveur sans GPU : `make install-ppo` (torch CPU dans .venv).
 - Changer l'observation ou le réseau rend `runs/ppo` incompatible : `make ppo-reset CONFIRM=oui`.
 - Les jobs lourds (agy, gros dumps) sous `systemd-run --user --scope -p MemoryMax=...`, sinon l'OOM peut tuer la session.
+
+## Cycles de récompense (depuis le 2026-11-02)
+
+But : Link explore le plus de salles possible et tue des ennemis, sans qu'un re-kill rapporte. Runs de 10M de pas dans `runs/iterN` : `make ppo-start PPO_RUN=runs/iterN PPO_ARGS="--total-steps 10000000"`, puis `scripts/eval_model.py runs/iterN/model.pt --out runs/iterN/eval.json` (graines fixes). Le journal est dans `runs/journal.md`.

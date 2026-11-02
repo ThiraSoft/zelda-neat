@@ -8,18 +8,18 @@ import neat
 
 from . import ram
 from .archive import cell_key, read_state
-from .env import BUTTONS, EQUIP_A, EQUIP_B, ZeldaEnv, to_mask
+from .env import BUTTONS, EQUIP_A, EQUIP_B, ZeldaEnv, to_mask, warp_random
 from .fitness import Tracker
 
-FRAMES_PER_ACTION = 4
+FRAMES_PER_ACTION = 12     # 5 décisions par seconde
 MAX_FRAMES = 2 * 60 * 60   # 2 minutes de jeu par save state
 PATIENCE = 15 * 60         # arrêt si rien de nouveau pendant 15 s
 
 # Exploration aléatoire façon Go-Explore : une action tirée au hasard est répétée
-# tant qu'un tirage reste sous STICKY (en moyenne 40 frames à 0.9).
+# tant qu'un tirage reste sous STICKY (en moyenne 40 frames à 0.7, soit 3,3 pas de 12 frames).
 RANDOM_ACTIONS = (set(), {"up"}, {"down"}, {"left"}, {"right"}, {"a"}, {"b"},
                   {"up", "a"}, {"down", "a"}, {"left", "a"}, {"right", "a"})
-STICKY = 0.9
+STICKY = 0.7
 
 _env = None
 _states = None
@@ -37,23 +37,24 @@ def busy(m):
     return m[ram.TEXT_ACTIVE] or m[ram.DISABLED_OBJECTS] & 0x81
 
 
-def rollout(env, policy, state, render=False, max_frames=None, patience=None, known=None):
+def rollout(env, policy, state, render=False, max_frames=None, patience=None, known=None, on_step=None, warp=False, rng=None):
     """Joue une partie avec policy(obs) -> boutons. Avec `known` (clés de l'archive),
     t.captured reçoit par cellule nouvelle (state compressé, inputs depuis le départ), pris
     quand Link est contrôlable. Un input = un octet (voir env.to_mask) tenu FRAMES_PER_ACTION frames."""
     max_frames = max_frames or MAX_FRAMES
     patience = patience or PATIENCE
     env.load(state)
-    # Calibrage : 4 coeurs max (16 quarts), 0 rubis, épée sur B, bouclier sur A, rafraîchissement HUD
-    m = env.pb.memory
-    m[ram.LINK_MAX_HEALTH] = min(env.mem[ram.LINK_MAX_HEALTH], 16)
-    m[ram.LINK_HEALTH] = min(env.mem[ram.LINK_HEALTH], 16)
-    m[ram.RUPEES] = 0
-    m[ram.RUPEES + 1] = 0
-    m[EQUIP_B] = 0x05
-    m[EQUIP_A] = 0x01
-    m[0xCBEA] = 0x09
-    for _ in range(15):
+    if warp:
+        warp_random(env, rng)
+    else:
+        m = env.pb.memory
+        m[ram.LINK_MAX_HEALTH] = min(env.mem[ram.LINK_MAX_HEALTH], 16)
+        m[ram.LINK_HEALTH] = min(env.mem[ram.LINK_HEALTH], 16)
+        m[ram.RUPEES] = 0
+        m[ram.RUPEES + 1] = 0
+        m[EQUIP_B] = 0x05
+        m[EQUIP_A] = 0x01
+        m[0xCBEA] = 0x09
         env.step(set(), 1, render)
     t = Tracker(env.mem, known or frozenset(), cell_key if known is not None else None)
     t.captured = {}
@@ -72,6 +73,9 @@ def rollout(env, policy, state, render=False, max_frames=None, patience=None, kn
         if (known is not None and t.cell in t.novel and t.cell not in t.captured
                 and not t.dead and m[ram.LINK_HEALTH] and not busy(m)):
             t.captured[t.cell] = (zlib.compress(env.save(), 1), bytes(actions))
+        if on_step is not None:
+            if on_step(env, t, buttons) is False:
+                break
     return t
 
 
@@ -95,11 +99,11 @@ def play(env, net, state, **kw):
     return rollout(env, net_policy(net), state, **kw)
 
 
-def solo(env, policy, state, seconds=1200, render=False):
+def solo(env, policy, state, seconds=1200, render=False, on_step=None, warp=False, rng=None):
     """Métrique joueur seul : une partie de `seconds` depuis `state`, sans save state ni
     patience, arrêtée seulement par la mort. Renvoie le Tracker (voir solo_line)."""
     frames = int(seconds * 60)
-    return rollout(env, policy, state, render=render, max_frames=frames, patience=frames + 1)
+    return rollout(env, policy, state, render=render, max_frames=frames, patience=frames + 1, on_step=on_step, warp=warp, rng=rng)
 
 
 def solo_score(t):

@@ -15,6 +15,29 @@ import random
 import time
 
 
+class RewardNorm:
+    """Divise les récompenses par l'écart-type courant du retour actualisé : le réseau voit une
+    échelle stable, et la perte de valeur n'écrase plus la politique dans le gradient coupé."""
+
+    def __init__(self, n_env, gamma, device, clip=10.0):
+        import torch
+        self.gamma, self.clip = gamma, clip
+        self.ret = torch.zeros(n_env, device=device)
+        self.var, self.count = 1.0, 1e-4
+
+    def __call__(self, r, done):
+        self.ret = self.ret * self.gamma + r
+        n, var = self.ret.numel(), self.ret.var(unbiased=False).item() + self.ret.mean().item() ** 2
+        total = self.count + n
+        self.var = (self.var * self.count + var * n) / total
+        self.count = total
+        self.ret = self.ret * (1.0 - done)
+        return (r / (self.var ** 0.5 + 1e-8)).clamp(-self.clip, self.clip)
+
+    def state(self):
+        return {"var": self.var, "count": self.count}
+
+
 def build_demos(ctx, args, archive, targets, curriculum):
     from zneat.archive import key_str
     from zneat.ppo_env import make_demo
@@ -111,6 +134,11 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Policy(hidden=args.hidden, arch=args.arch).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)
+    # Demi-précision sur GPU : inférence 2,4 fois plus rapide, mises à jour 1,5 fois (mesuré sur RX 9070).
+    # Les poids restent en float32, le modèle sauvé se joue tel quel sur CPU.
+    amp = device == "cuda"
+    autocast = lambda: torch.autocast("cuda", dtype=torch.float16, enabled=amp)  # noqa: E731
+    scaler = torch.amp.GradScaler("cuda", enabled=amp)
     step = 0
     if args.resume and os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -186,11 +214,14 @@ def main():
     rew_buf = torch.zeros((T, n_env), device=device)
     done_buf = torch.zeros((T, n_env), device=device)
     val_buf = torch.zeros((T, n_env), device=device)
+    reward_norm = RewardNorm(n_env, args.gamma, device)
+    if args.resume and os.path.exists(ckpt_path) and "reward_norm" in ck:
+        reward_norm.var, reward_norm.count = ck["reward_norm"]["var"], ck["reward_norm"]["count"]
 
     def save():
         save_model(model, model_path)
         torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step,
-                    "curriculum": curriculum.state(), "kind": "cnn-lstm", "n_vec": PPO_INPUTS, "arch": args.arch},
+                    "curriculum": curriculum.state(), "reward_norm": reward_norm.state(), "kind": "cnn-lstm", "n_vec": PPO_INPUTS, "arch": args.arch},
                    ckpt_path + ".tmp")
         os.replace(ckpt_path + ".tmp", ckpt_path)
 
@@ -204,20 +235,23 @@ def main():
     t_solo -= args.solo_minutes * 60 - 120    # première partie solo après 2 min
     steps_log, update, solo_proc = step, 0, None
     bc_val = 0.0
+    t_collect = t_learn = 0.0
     try:
         while args.total_steps is None or step < args.total_steps:
+            t_cycle = time.time()
             start_state = (lstm_state[0].clone(), lstm_state[1].clone())
             model.eval()
             for t in range(T):
-                with torch.no_grad():
+                with torch.no_grad(), autocast():
                     logits, v, lstm_state = model(frames[None], vecs[None], lstm_state, done[None])
-                    dist = Categorical(logits=logits[0])
+                    dist = Categorical(logits=logits[0].float())
                     a = dist.sample()
                 frame_buf[t], vec_buf[t], done_buf[t] = frames, vecs, done
-                act_buf[t], logp_buf[t], val_buf[t] = a, dist.log_prob(a), v[0]
+                act_buf[t], logp_buf[t], val_buf[t] = a, dist.log_prob(a), v[0].float()
                 f, o, r, d, infos = vec.step(a.cpu().numpy(), cur_msg)
                 cur_msg = None
-                frames, vecs, rew_buf[t], done = to(f), to(o), to(r), to(d)
+                frames, vecs, done = to(f), to(o), to(d)
+                rew_buf[t] = reward_norm(to(r), done)
                 for info in infos:
                     (horon_eps if info["demo"] is None and info["target"] is None else eps).append(info)
                     event = curriculum.record(info)
@@ -231,9 +265,10 @@ def main():
                             cur_msg = curriculum.message()
             step += T * n_env
 
-            with torch.no_grad():
+            t_rollout = time.time()
+            with torch.no_grad(), autocast():
                 _, next_v, _ = model(frames[None], vecs[None], lstm_state, done[None])
-                next_v = next_v[0]
+                next_v = next_v[0].float()
             adv = torch.zeros_like(rew_buf)
             last = torch.zeros(n_env, device=device)
             for t in reversed(range(T)):
@@ -252,8 +287,10 @@ def main():
                 perm = torch.randperm(n_env, device=device)
                 for i in range(0, n_env, per_mb):
                     e = perm[i:i + per_mb]
-                    logits, v, _ = model(frame_buf[:, e], vec_buf[:, e],
-                                         (start_state[0][:, e], start_state[1][:, e]), done_buf[:, e])
+                    with autocast():
+                        logits, v, _ = model(frame_buf[:, e], vec_buf[:, e],
+                                             (start_state[0][:, e], start_state[1][:, e]), done_buf[:, e])
+                    logits, v = logits.float(), v.float()
                     dist = Categorical(logits=logits)
                     ratio = (dist.log_prob(act_buf[:, e]) - logp_buf[:, e]).exp()
                     a_n = adv[:, e]
@@ -269,21 +306,28 @@ def main():
                             loss = loss + args.bc_coef * bc
                             bc_val = bc.item()
                     opt.zero_grad()
-                    loss.backward()
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(opt)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-                    opt.step()
+                    scaler.step(opt)
+                    scaler.update()
             update += 1
+            t_collect += t_rollout - t_cycle
+            t_learn += time.time() - t_rollout
 
             now = time.time()
             if now - t_log >= 60:
                 sps = (step - steps_log) / (now - t_log)
-                h = (f"horon : score moyen {np.mean([e['score'] for e in horon_eps]):.1f}, "
+                h = (f"parties : salles {np.mean([e['rooms'] for e in horon_eps]):.2f}, types {np.mean([e['kinds'] for e in horon_eps]):.2f}, "
+                     f"morts {100 * np.mean([e['dead'] for e in horon_eps]):.0f} %, score moyen {np.mean([e['score'] for e in horon_eps]):.1f}, "
                      f"max {max(e['score'] for e in horon_eps)}, kills {np.mean([e['kills'] for e in horon_eps]):.1f} "
                      f"({len(horon_eps)} ép.)" if horon_eps else "horon : -")
                 g = (f"démos : succès {100 * np.mean([e['success'] for e in eps]):.0f} % "
                      f"({len(eps)} ép.)" if eps else "démos : -")
                 print(f"ppo : étape {step / 1e6:.2f} M, {sps:.0f} pas/s | {h} | {g} | "
-                      f"pi {pg.item():.3f} v {vl.item():.3f} entropie {ent.item():.2f} imitation {bc_val:.2f}")
+                      f"pi {pg.item():.3f} v {vl.item():.3f} entropie {ent.item():.2f} imitation {bc_val:.2f} | "
+                      f"collecte {100 * t_collect / (t_collect + t_learn):.0f} %")
+                t_collect = t_learn = 0.0
                 if curriculum.demos:
                     print(f"curriculum : {curriculum.summary()}")
                 eps, horon_eps, t_log, steps_log = [], [], now, step

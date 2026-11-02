@@ -14,7 +14,7 @@ GENERATIONS ?=
 # options en plus pour train.py
 ARGS ?=
 # partie solo (joueur seul depuis Horon) : durée, fréquence dans make start (générations)
-SOLO_SECONDS ?= 1200
+SOLO_SECONDS ?= 120
 SOLO_EVERY ?= 5
 GENOME ?= models/neat.pkl
 # RANDOM_LOCATION=1 : replay, compare, ppo-replay et ppo-solo partent d'une cellule de DATASET_ARCHIVE
@@ -25,23 +25,24 @@ COMPARE_SECONDS ?= 120
 
 # PPO : un seul réseau. Python avec torch : le venv ROCm s'il existe, sinon .venv (make install-ppo)
 PPO_PY ?= $(firstword $(wildcard /mnt/data/dev/trainvenv-rocm/bin/python) .venv/bin/python)
-PPO_RUN ?= runs/ppo
-ARCHIVE ?= $(RUN)/archive
-PPO_WORKERS ?= $(shell echo $$(( $(WORKERS) > 1 ? $(WORKERS) - 1 : 1 )))
-ENVS ?= 8
+PPO_RUN ?= $(or $(shell ls -dt runs/iter* 2>/dev/null | head -1),runs/iter1)
+ARCHIVE ?= $(firstword $(wildcard $(RUN)/archive) spawns)
+# Un worker par cœur : le processus principal attend pendant que les émulateurs tournent, et inversement.
+PPO_WORKERS ?= $(WORKERS)
+ENVS ?= 7
 DEMOS ?= 0
-HORON ?= 0.3
-WARP ?= 0.35
-SOLO_MINUTES ?= 15
-PPO_MAX_SECONDS ?= 1200
-PPO_PATIENCE ?= 120
+HORON ?= 0.0
+WARP ?= 1.0
+SOLO_MINUTES ?= 5
+PPO_MAX_SECONDS ?= 120
+PPO_PATIENCE ?= 30
 PPO_LR ?= 3.5e-4
-PPO_ENT ?= 0.02
-PPO_ARGS ?=
+PPO_ENT ?= 0.01
+PPO_ARGS ?= --total-steps 10000000
 # imitation des démos : poids dans la perte PPO, pas à chaque nouvelle démo (0 = PPO pur sur le curriculum)
 BC_COEF ?= 0.0
 BC_BURST ?= 0
-MODEL ?= models/ppo.pt
+MODEL ?= $(shell ls -t runs/iter*/model.pt models/ppo.pt 2>/dev/null | head -1)
 CHECK ?= 20
 # dataset world model
 DATASET ?= /mnt/data/datasets/zelda
@@ -49,7 +50,7 @@ DATASET_GB ?= 50
 # cœurs libres au lancement : nproc moins la charge moyenne sur 1 min, au moins 1
 DATASET_WORKERS ?= $(shell awk -v n=$$(nproc) '{w = n - int($$1 + 0.5); print (w < 1 ? 1 : w)}' /proc/loadavg)
 # modèles PPO, à parts égales dans les parties jouées par un modèle ; vide = tout au hasard
-DATASET_MODEL ?= $(firstword $(wildcard models/ppo.pt runs/checkpoints-20m/model.pt runs/ppo-impala/model.pt))
+DATASET_MODEL ?= models/ppo.pt
 # part des parties jouées par le modèle, le reste au hasard (70% modèle, 30% aléatoire)
 DATASET_MODEL_FRAC ?= 0.7
 # cellules de départ (8 par salle au plus, tirées de runs/horon/archive)
@@ -128,6 +129,7 @@ help:
 	@echo "make ppo-log      suit le PPO"
 	@echo "make ppo-solo     MODEL (défaut models/ppo.pt) joue seul depuis Horon"
 	@echo "make ppo-replay   regarde MODEL jouer depuis Horon (fenêtre)"
+	@echo "make ppo-watch    regarde MODEL jouer en direct dans le terminal (compatible neonmux/PWA)"
 	@echo "make ppo-reset    efface PPO_RUN (demande CONFIRM=oui)"
 	@echo "make record       joue et enregistre une démonstration humaine pour l'imitation (fenêtre SDL)"
 	@echo "make neat-spawns-start / -stop / -log   NEAT en score solo, départs au hasard dans spawns/, run NEAT_RUN"
@@ -260,6 +262,9 @@ ppo-solo:
 
 ppo-replay:
 	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS) --window
+
+ppo-watch:
+	$(PPO_PY) solo.py --model $(MODEL) --state $(START) --seconds $(SOLO_SECONDS) --term --loop --warp $(ARGS)
 
 RECORD_NAME ?=
 RECORD_SCALE ?= 3

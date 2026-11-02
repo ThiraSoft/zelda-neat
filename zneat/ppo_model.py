@@ -12,6 +12,7 @@ from torch import nn
 from .archive import read_state
 from .env import SCREEN, ZeldaEnv
 from .obs import ACTIONS, PPO_INPUTS, Observer, observe
+from .ppo_env import COOLDOWN_START, COOLDOWN_STEPS
 from .runner import solo, solo_line, solo_score
 
 
@@ -56,18 +57,18 @@ class Policy(nn.Module):
         self.hidden, self.n_vec, self.arch = hidden, n_vec, arch
         if arch == "impala":
             self.cnn = nn.Sequential(
-                Conv(1, 48, 8, 4), nn.ReLU(),
+                Conv(3, 48, 8, 4), nn.ReLU(),
                 Conv(48, 96, 4, 2), nn.ReLU(),
                 Conv(96, 192, 3, 1), nn.ReLU(),
                 nn.Flatten())
             n_fc = 512
         else:
             self.cnn = nn.Sequential(
-                Conv(1, 32, 8, 4), nn.ReLU(), Conv(32, 64, 4, 2), nn.ReLU(),
+                Conv(3, 32, 8, 4), nn.ReLU(), Conv(32, 64, 4, 2), nn.ReLU(),
                 Conv(64, 64, 3, 1), nn.ReLU(), nn.Flatten())
             n_fc = 256
         with torch.no_grad():
-            n_cnn = self.cnn(torch.zeros(1, 1, *SCREEN)).shape[1]
+            n_cnn = self.cnn(torch.zeros(1, *SCREEN)).shape[1]
         self.cnn_fc = nn.Sequential(nn.Linear(n_cnn, n_fc), nn.ReLU())
         self.vec = nn.Sequential(nn.Linear(n_vec, 128), nn.ReLU())
         self.lstm = nn.LSTM(n_fc + 128, hidden)
@@ -81,10 +82,10 @@ class Policy(nn.Module):
         return z, z.clone()
 
     def forward(self, frames, vec, state, done):
-        """frames (T, B, 72, 80) uint8, vec (T, B, n_vec), done (T, B) : 1 si le pas ouvre un épisode,
+        """frames (T, B, 3, 72, 80) uint8, vec (T, B, n_vec), done (T, B) : 1 si le pas ouvre un épisode,
         la mémoire est alors remise à zéro. Renvoie logits (T, B, A), valeurs (T, B), état."""
         T, B = frames.shape[:2]
-        x = self.cnn(frames.reshape(T * B, 1, *SCREEN).float() / 255)
+        x = self.cnn(frames.reshape(T * B, *SCREEN).float() / 255)
         x = torch.cat((self.cnn_fc(x), self.vec(vec.reshape(T * B, -1).float())), -1).reshape(T, B, -1)
         # Le LSTM tourne d'un bloc entre deux débuts d'épisode (rares) : bien plus rapide qu'un pas à la fois.
         starts = [0] + [t for t in done[1:].any(1).nonzero().flatten().add(1).tolist()] + [T]
@@ -116,6 +117,72 @@ def load_model(path):
     return model.eval()
 
 
+class InputLimiter:
+    """Mêmes règles qu'à l'entraînement (Episode.step) : A et B tenus librement, pause de COOLDOWN pas
+    après un relâchement, Start au plus tous les COOLDOWN_START pas."""
+
+    def __init__(self):
+        self.held = {"a": False, "b": False}
+        self.cooldown = {"a": 0, "b": 0}
+        self.cooldown_start = 0
+
+    def __call__(self, wanted):
+        wanted = set(wanted)
+        for k in ("a", "b"):
+            if k in wanted:
+                if self.held[k]:
+                    pass
+                elif self.cooldown[k] > 0:
+                    wanted.remove(k)
+                    self.cooldown[k] -= 1
+                else:
+                    self.held[k] = True
+            elif self.held[k]:
+                self.held[k] = False
+                self.cooldown[k] = COOLDOWN_STEPS
+            elif self.cooldown[k] > 0:
+                self.cooldown[k] -= 1
+        if "start" in wanted and self.cooldown_start > 0:
+            wanted.remove("start")
+        elif "start" in wanted:
+            self.cooldown_start = COOLDOWN_START
+        if self.cooldown_start > 0 and "start" not in wanted:
+            self.cooldown_start -= 1
+        return wanted
+
+
+class BatchPolicy:
+    """Un modèle pour plusieurs parties à la fois : une passe du réseau pour tout le lot (3 fois moins cher
+    par partie à 8 qu'une à une sur CPU). Chaque partie garde sa mémoire LSTM, ses salles vues et ses limites."""
+
+    def __init__(self, model, seed=0):
+        self.model = model
+        self.gen = torch.Generator().manual_seed(seed)
+
+    def new_game(self):
+        return {"observer": Observer(), "state": self.model.initial_state(1), "limit": InputLimiter()}
+
+    @torch.no_grad()
+    def act(self, envs, games):
+        n_vec = self.model.n_vec
+        fs, vs = [], []
+        for env, g in zip(envs, games):
+            f, v = observe(env, g["observer"])
+            if len(v) != n_vec:
+                v = v[:n_vec] if len(v) > n_vec else np.pad(v, (0, n_vec - len(v)))
+            fs.append(f)
+            vs.append(v)
+        state = (torch.cat([g["state"][0] for g in games], 1), torch.cat([g["state"][1] for g in games], 1))
+        logits, _, (h, c) = self.model(torch.from_numpy(np.stack(fs))[None], torch.from_numpy(np.stack(vs))[None],
+                                       state, torch.zeros(1, len(games)))
+        idx = torch.multinomial(torch.softmax(logits[0], -1), 1, generator=self.gen)[:, 0].tolist()
+        out = []
+        for j, g in enumerate(games):
+            g["state"] = (h[:, j:j + 1], c[:, j:j + 1])
+            out.append(g["limit"](ACTIONS[idx[j]] if idx[j] < len(ACTIONS) else set()))
+        return out
+
+
 def torch_policy(model, greedy=False, seed=0):
     """policy(env) -> boutons, pour runner.rollout avec render=True (l'écran doit être rendu).
     Une politique par partie : elle garde la mémoire du LSTM et les salles vues."""
@@ -123,10 +190,7 @@ def torch_policy(model, greedy=False, seed=0):
     observer = Observer()
     state = [model.initial_state(1)]
     zero = torch.zeros(1, 1)
-    held_a = [False]
-    held_b = [False]
-    cooldown_a = [0]
-    cooldown_b = [0]
+    limit = InputLimiter()
 
     @torch.no_grad()
     def policy(env):
@@ -143,40 +207,7 @@ def torch_policy(model, greedy=False, seed=0):
             idx = int(logits.argmax())
         else:
             idx = int(torch.multinomial(torch.softmax(logits, -1), 1, generator=gen))
-        act = ACTIONS[idx] if idx < len(ACTIONS) else set()
-
-        wanted = set(act)
-        if "a" in wanted:
-            if held_a[0]:
-                pass
-            elif cooldown_a[0] > 0:
-                wanted.remove("a")
-                cooldown_a[0] -= 1
-            else:
-                held_a[0] = True
-        else:
-            if held_a[0]:
-                held_a[0] = False
-                cooldown_a[0] = 2
-            elif cooldown_a[0] > 0:
-                cooldown_a[0] -= 1
-
-        if "b" in wanted:
-            if held_b[0]:
-                pass
-            elif cooldown_b[0] > 0:
-                wanted.remove("b")
-                cooldown_b[0] -= 1
-            else:
-                held_b[0] = True
-        else:
-            if held_b[0]:
-                held_b[0] = False
-                cooldown_b[0] = 2
-            elif cooldown_b[0] > 0:
-                cooldown_b[0] -= 1
-
-        return wanted
+        return limit(ACTIONS[idx] if idx < len(ACTIONS) else set())
     return policy
 
 
@@ -190,16 +221,14 @@ def solo_eval(rom, seed_path, model_path, seconds, step, run):
     env = ZeldaEnv(rom)
 
     # Récupération des positions aléatoires dans l'archive si disponible
-    archive_dir = os.environ.get("ARCHIVE", "runs/horon/archive")
-    if not os.path.exists(archive_dir):
-        archive_dir = "runs/goexplore/archive"
     candidates = []
-    if os.path.exists(archive_dir):
-        try:
-            from dataset import room_capped
-            candidates = room_capped(archive_dir, 4)
-        except Exception:
-            candidates = []
+    try:
+        from dataset import room_capped
+        for archive_dir in (os.environ.get("ARCHIVE"), "runs/horon/archive", "runs/goexplore/archive", "spawns"):
+            if archive_dir and (candidates := room_capped(archive_dir, 4)):
+                break
+    except Exception:
+        candidates = []
 
     eval_seconds = min(seconds, 300)
     seeds = (0, 42, 123, 2024, 999)

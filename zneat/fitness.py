@@ -47,6 +47,7 @@ class Tracker:
     def update(self, m, frames):
         """Renvoie True si quelque chose de nouveau a été obtenu."""
         self.frames += frames
+        self.last_kills = []   # type de chaque ennemi tué pendant ce pas
         new = False
 
         room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM], m[ram.SEASON])
@@ -75,6 +76,7 @@ class Tracker:
             prev_id, prev_hp = self.slots[s]
             if prev_hp > 0 and cur[0] == prev_id and cur[1] == 0:
                 self.kills += 1
+                self.last_kills.append(prev_id)
                 if prev_id not in self.kinds:
                     self.kinds.add(prev_id)
                     new = True

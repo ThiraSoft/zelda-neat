@@ -34,7 +34,7 @@ Toutes les commandes passent par `make` (`make help` les liste) :
     make stop                    # arrêt propre avec checkpoint (systemd ou tmux)
     make status                  # génération, salles, kills, plateaux, erreurs
     make log                     # suit la progression
-    make replay                  # le meilleur génome NEAT (models/neat.pkl) joue depuis Horon, en fenêtre
+    make replay                  # un génome NEAT (GENOME=..., plus fourni dans le dépôt) joue depuis Horon, en fenêtre
     make compare                 # NEAT et PPO jouent en même temps depuis Horon, deux fenêtres (COMPARE_SECONDS=120)
     make ppo-replay RANDOM_LOCATION=1   # départ dans une cellule de spawns/ au hasard (aussi replay, compare, ppo-solo)
     make reset CONFIRM=oui       # efface le run, le prochain start repart de zéro
@@ -154,7 +154,7 @@ Le score solo mesure ce qu'un réseau sait faire sans aide : il part de `states/
 
 ## Chemins d'inputs
 
-Chaque cellule ajoutée à l'archive garde sa cellule parente (celle d'où la partie est partie) et les inputs joués depuis le state parent, dans `archive/<clé>.path.z` (un octet par pas de 4 frames, bits haut, bas, gauche, droite, A, B). En remontant les parents jusqu'à la graine, on obtient la suite d'inputs qui mène de Horon à la cellule. Le rejeu est exact (vérifié au pixel près par `make paths-check`), parce que `env.load` relâche toutes les touches après un chargement.
+Chaque cellule ajoutée à l'archive garde sa cellule parente (celle d'où la partie est partie) et les inputs joués depuis le state parent, dans `archive/<clé>.path.z` (un octet par pas de 12 frames, bits haut, bas, gauche, droite, A, B). En remontant les parents jusqu'à la graine, on obtient la suite d'inputs qui mène de Horon à la cellule. Le rejeu est exact (vérifié au pixel près par `make paths-check`), parce que `env.load` relâche toutes les touches après un chargement.
 
 Les cellules d'avant cette version n'ont pas de chemin : `runs/horon` n'en a donc presque aucun. Pour le PPO, il faut un run qui a démarré avec les chemins, par exemple :
 
@@ -196,9 +196,7 @@ Toutes les 5 générations, le meilleur génome joue 10 min seul depuis Horon (l
 ## Dataset world model
 
 Le dépôt contient ce qu'il faut pour générer le dataset sans rien réentraîner :
-- `models/neat.pkl` : le meilleur génome NEAT (2 salles seul), pour comparer avec `make compare`.
-- `models/ppo.pt` : le joueur PPO (CNN écran + LSTM), meilleur score solo 15 (9 à 13 salles en 10 min depuis Horon). Il vient de `runs/ppo/model-best.pt`.
-- `models/ppo-kills.pt` : le même réseau entraîné 15,8 M pas de plus avec une récompense par ennemi tué. Il explore un peu moins (10 à 13) mais se bat plus (1,8 kill par partie contre 0,6).
+- `models/ppo.pt` : le modèle officiel, seul modèle du dépôt. Joueur PPO (CNN Impala sur l'écran en moyenne 2x2 + grille de la salle + LSTM), 12 frames par action, 20 M pas (run `iter2`). Sur 30 parties de 2 min téléportées au hasard : 5,3 salles (max 24), 0,9 kill, 17 % de morts, 1,4 % du temps dans le menu. Détails dans `models/ppo.json`.
 - `spawns/` : 1 054 points de départ (states PyBoy compressés), au plus 8 par salle, sur 134 salles, tirés de l'archive Go-Explore `runs/horon/archive`.
 - `states/horon-endgame.state` : Horon avec l'inventaire de fin de jeu.
 
@@ -221,17 +219,18 @@ Installation, puis lancement :
 | `DATASET` | `/mnt/data/datasets/zelda` | dossier de sortie |
 | `DATASET_GB` | 50 | arrêt quand le dossier atteint cette taille |
 | `DATASET_WORKERS` | cœurs libres | un émulateur par worker ; par défaut nproc moins la charge du moment |
-| `DATASET_MODEL` | `models/ppo.pt models/ppo-kills.pt` | joueurs, à parts égales ; vide = tout au hasard |
+| `DATASET_MODEL` | `models/ppo.pt` | joueurs, à parts égales s'il y en a plusieurs ; vide = tout au hasard |
 | `DATASET_MODEL_FRAC` | 0.7 | part des parties jouées par le modèle, le reste au hasard |
 | `DATASET_ARCHIVE` | `spawns` | cellules de départ |
 
-Chaque partie dure 2 min de jeu (`--seconds` de `dataset.py`) et part d'une cellule de `spawns/` tirée au hasard, ou de Horon une fois sur 10 (`--horon`). Elle est jouée par un modèle 7 fois sur 10 (moitié `ppo`, moitié `ppo-kills`, échantillonné, graine différente à chaque partie), et sinon par des actions aléatoires collantes : le modèle donne des trajectoires qui vont quelque part, le hasard couvre les actions que le modèle ne prend jamais (coups dans le vide, marche contre les murs). La partie s'arrête plus tôt si Link meurt. Une config `config-<graine>.json` est écrite à chaque lancement, on peut en lancer plusieurs sur le même dossier.
+Chaque partie dure 2 min de jeu (`--seconds` de `dataset.py`) et part d'une cellule de `spawns/` tirée au hasard, ou de Horon une fois sur 10 (`--horon`). Elle est jouée par un modèle 7 fois sur 10 (`models/ppo.pt`, échantillonné, graine différente à chaque partie), et sinon par des actions aléatoires collantes : le modèle donne des trajectoires qui vont quelque part, le hasard couvre les actions que le modèle ne prend jamais (coups dans le vide, marche contre les murs). La partie s'arrête plus tôt si Link meurt. Une config `config-<graine>.json` est écrite à chaque lancement, on peut en lancer plusieurs sur le même dossier.
 
 Un fichier par partie, `ep-<graine>-<worker>-<n>.npz` :
 - `frames` (N, 144, 160, 3) uint8 RGB, l'écran après chaque action ;
-- `actions` (N,) uint8, bits haut, bas, gauche, droite, A, B, tenus 4 frames ;
+- `actions` (N,) uint8, bits haut, bas, gauche, droite, A, B, tenus 12 frames (`frames_per_action`, absent des parties enregistrées avant ce changement, qui sont à 4 frames) ;
+- `scripted` (N,) bool, pas joués par la séquence de menu scriptée (`--menu-frac`, 5 % par défaut) plutôt que par la politique ;
 - `first` l'écran avant la première action ;
-- `start` la cellule de départ, `policy` (`ppo`, `ppo-kills` ou `random`).
+- `start` la cellule de départ, `policy` (`ppo` ou `random`).
 
 Environ 3,4 Ko par frame compressée : 50 Go font à peu près 14 millions de frames, soit 270 h de jeu à 15 actions par seconde.
 

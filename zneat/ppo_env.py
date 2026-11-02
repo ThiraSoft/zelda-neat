@@ -10,7 +10,7 @@ import numpy as np
 
 from . import ram
 from .archive import read_state
-from .env import ZeldaEnv, EQUIP_B, EQUIP_A, tile_value
+from .env import ZeldaEnv, EQUIP_B, EQUIP_A, tile_value, warp_random
 from .fitness import Tracker
 from .obs import ACTIONS, Observer, observe
 from .paths import build_demo
@@ -19,26 +19,16 @@ from .runner import FRAMES_PER_ACTION, busy
 W_ROOM = 2.0      # salle (groupe, salle) jamais vue pendant l'épisode (hausse pour motiver l'exploration)
 W_VARIANT = 0.1   # même salle dans une autre saison : peu, sinon changer de saison sur place rapporte
 W_KIND = 2.5      # type d'ennemi tué pour la première fois de l'épisode (boosté de 1.0 à 2.5 pour inciter à combattre)
-W_KILL = 0.1      # chaque ennemi tué, pour qu'il apprenne à se battre
-KILL_CAP = 5      # kills payés au plus par salle et par épisode, contre le farm des réapparitions
+W_KILL = 1.0      # type d'ennemi tué pour la première fois dans cette salle pendant l'épisode : un re-kill ne rapporte rien (0.5 dans iter1 : 0.5 type par partie)
 W_STORY = 1.0     # bit d'histoire gagné
-W_TILE = 0.01     # case visitée (réduit de 0.05 à 0.01 pour éviter le piétinement en boucle)
-W_BACKTRACK = -0.5  # pénalité si Link refait un demi-tour immédiat vers la salle précédente (< 5s)
-W_LOCAL_STAGNATION = -0.02  # pénalité si Link tourne en rond sur place (< 32 px sur 15 pas = 3s)
-W_ROOM_STAGNATION = -0.01   # pénalité si Link traîne > 35 pas (7s) dans la même salle sans progrès
-W_SPAM = -0.005     # micro-pénalité si appui répété A/B pendant le cooldown (anti-spam bouclier/épée)
-COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max ~1.7/s)
-W_EQUIP = 0.02    # micro-bonus la première fois qu'un objet est équipé (exploration menu)
-W_RUPEE = 0.005   # micro-bonus par rubis gagné (+0.005 vert, +0.025 bleu, +0.10 rouge)
-W_MENU = -0.02    # pénalité continue dans le menu pour éviter qu'il s'y réfugie
-W_MENU_STAGNATION = -0.03  # sur-pénalité si Link traîne > 15 pas (> 3s) dans le menu sans en sortir
+W_TILE = 0.002    # case visitée (réduit de 0.01 à 0.002 pour éviter d'inciter à ratisser le sol en boucle)
+W_ROOM_STAGNATION = -0.02   # par pas passé dans la même salle au-delà du seuil, sans paliers
+COOLDOWN_START = 10  # pas (2 s) entre deux appuis sur Start
+COOLDOWN_STEPS = 2  # pas d'action (12 frames = 0.2s par pas) de pause obligatoire entre deux appuis A ou B (max 1,25/s)
+W_MENU = -0.02    # par pas menu ouvert (iter1 : 21 % du temps dans le menu, le dataset ajoute ses propres séquences)
 W_DAMAGE = -0.08  # par quart de coeur perdu (incite à esquiver/parer, -0.32 par coeur entier)
-W_DEATH = -2.0    # mort : annule entièrement une découverte de salle pour éviter le jeu kamikaze
-
-
-def bcd_rupees(m):
-    return ((m[ram.RUPEES + 1] >> 4) * 1000 + (m[ram.RUPEES + 1] & 0xF) * 100
-            + (m[ram.RUPEES] >> 4) * 10 + (m[ram.RUPEES] & 0xF))
+W_DEATH = -5.0    # mort : plus cher que le pire cas sans mourir (stagnation jusqu'à la patience + timeout)
+W_PATIENCE_TIMEOUT = -2.0  # abandon : patience épuisée sans finir le run
 
 
 class Episode:
@@ -74,25 +64,7 @@ class Episode:
         elif r < horon + warp:
             # Téléportation vers une carte aléatoire du monde entier (Overworld, Subrosia, Donjons)
             self.env.load(self.seed)
-            g = self.rng.choice([0, 0, 1, 4, 5])
-            room_id = self.rng.randint(0, 63 if g == 1 else 255)
-            self.env.pb.memory[0xCC63] = 0x80 | g
-            self.env.pb.memory[0xCC64] = room_id
-            self.env.pb.memory[0xCC66] = 0x45
-            self.env.pb.memory[0xCC67] = 0x01
-            self.env.pb.memory[ram.SEASON] = self.rng.randint(0, 3)
-            for _ in range(35):
-                self.env.step(set(), 1, False)
-
-            m = self.env.mem
-            coll = m[ram.ROOM_COLLISIONS:ram.ROOM_COLLISIONS + ram.ROOM_STRIDE * ram.ROOM_ROWS]
-            rows, cols = (11, 15) if m[ram.ROOM_IS_LARGE] else (8, 10)
-            free = [(y, x) for y in range(1, rows - 1) for x in range(1, cols - 1)
-                    if tile_value(coll[y * ram.ROOM_STRIDE + x]) == 0.0]
-            if free:
-                ty, tx = self.rng.choice(free)
-                self.env.pb.memory[ram.LINK + ram.OBJ_YH] = (ty << 4) + 8
-                self.env.pb.memory[ram.LINK + ram.OBJ_XH] = (tx << 4) + 8
+            warp_random(self.env, self.rng)
             step_start = 0
         elif demos:
             self.demo, self.ptr = self.rng.choice(demos)
@@ -106,7 +78,7 @@ class Episode:
             # Ce que la démo gagne entre ce point et la fin : à égaler pour un succès.
             self.target = ((end["rooms"] - here["rooms"])
                            + len(set(end["kinds"]) - prefill_kinds) + (end["story"] - here["story"]))
-            horizon = min(self.max_steps, 2 * (pts[-1]["step"] - here["step"]) + 450)
+            horizon = min(self.max_steps, 2 * (pts[-1]["step"] - here["step"]) + 150)
             step_start = here["step"]
             self.env.load(state)
         elif cells:
@@ -130,20 +102,17 @@ class Episode:
         self.rooms = set(prefill_rooms)
         self.observer = Observer(prefill_rooms, step=step_start)
         self.kinds = set(prefill_kinds)
-        self.room_kills = {}
+        self.room_kinds = set()
         self.health = self.env.mem[ram.LINK_HEALTH]
-        self.rupees = 0
         self.equipped_items = {self.env.mem[EQUIP_B], self.env.mem[EQUIP_A]} - {0}
         self.current_room = (self.env.mem[ram.ACTIVE_GROUP], self.env.mem[ram.ACTIVE_ROOM])
-        self.prev_room = None
-        self.room_transition_step = 0
         self.room_steps = 0
-        self.menu_steps = 0
-        self.pos_history = deque(maxlen=15)
+        self.room_is_new = (self.current_room not in self.rooms)
         self.held_a = False
         self.held_b = False
         self.cooldown_a = 0
         self.cooldown_b = 0
+        self.cooldown_start = 0
         self.horizon = horizon
         self.steps = self.idle = 0
         self.ret = 0.0
@@ -155,11 +124,10 @@ class Episode:
 
     def step(self, a):
         t = self.t
-        n_variants, n_tiles, story, kills = len(t.rooms), len(t.tiles), t.story, t.kills
+        n_variants, n_tiles, story = len(t.rooms), len(t.tiles), t.story
 
         # Maintien continu autorisé (bouclier levé ou épée chargée), pause / pénalité après relâchement
         wanted = set(ACTIONS[a])
-        spam_penalty = 0.0
 
         if "a" in wanted:
             if self.held_a:
@@ -168,7 +136,6 @@ class Episode:
             elif self.cooldown_a > 0:
                 # Tentative de ré-appui trop rapide après relâchement
                 wanted.remove("a")
-                spam_penalty += W_SPAM
                 self.cooldown_a -= 1
             else:
                 self.held_a = True
@@ -187,7 +154,6 @@ class Episode:
             elif self.cooldown_b > 0:
                 # Ré-appui trop rapide
                 wanted.remove("b")
-                spam_penalty += W_SPAM
                 self.cooldown_b -= 1
             else:
                 self.held_b = True
@@ -199,59 +165,52 @@ class Episode:
             elif self.cooldown_b > 0:
                 self.cooldown_b -= 1
 
+        if "start" in wanted and self.cooldown_start > 0:
+            wanted.remove("start")
+        elif "start" in wanted:
+            self.cooldown_start = COOLDOWN_START
+        if self.cooldown_start > 0 and "start" not in wanted:
+            self.cooldown_start -= 1
+
         self.env.step(wanted, FRAMES_PER_ACTION, True)
         m = self.env.mem
         new = t.update(m, FRAMES_PER_ACTION)
         room = (m[ram.ACTIVE_GROUP], m[ram.ACTIVE_ROOM])
-        r = spam_penalty
+        r = 0.0
         if room != self.current_room:
-            if room == self.prev_room and (self.steps - self.room_transition_step) < 25:
-                # Demi-tour immédiat / aller-retour à la bordure d'écran (< 5 secondes de jeu)
-                r += W_BACKTRACK
-            self.prev_room = self.current_room
             self.current_room = room
-            self.room_transition_step = self.steps
             self.room_steps = 0
+            self.room_is_new = (room not in self.rooms)
         else:
             self.room_steps += 1
+        room_is_new = False
         if room not in self.rooms:
             self.rooms.add(room)
             r += W_ROOM
+            room_is_new = True
+            self.room_is_new = True
         new_kinds = t.kinds - self.kinds
         r += W_KIND * len(new_kinds)
         self.kinds |= new_kinds
-        paid = min(t.kills - kills, KILL_CAP - self.room_kills.get(room, 0))
-        if paid > 0:
-            self.room_kills[room] = self.room_kills.get(room, 0) + paid
-            r += W_KILL * paid
+        paid = len({(room, kind) for kind in t.last_kills} - self.room_kinds)
+        self.room_kinds |= {(room, kind) for kind in t.last_kills}
+        r += W_KILL * paid
         r += W_VARIANT * (len(t.rooms) - n_variants) + W_TILE * (len(t.tiles) - n_tiles)
         r += W_STORY * (t.story - story)
 
-        in_menu = bool(m[ram.OPENED_MENU])
-        cutscene = busy(m) and not in_menu
+        # Les dialogues n'immunisent ni contre la stagnation ni contre l'idle,
+        # seule une vraie neutralisation par script (DISABLED_OBJECTS bit 0 ou 7) immunise.
+        stagnation_immune = bool(m[ram.DISABLED_OBJECTS] & 0x81) and not m[ram.TEXT_ACTIVE] and not m[ram.OPENED_MENU]
 
-        # Pénalité de séjour dans le menu (anti-exploit de pause)
-        if in_menu:
-            self.menu_steps += 1
-            r += W_MENU
-            if self.menu_steps > 15:
-                # Au-delà de 3s dans le menu sans en sortir, sur-pénalité lourde
-                r += W_MENU_STAGNATION
-        else:
-            self.menu_steps = 0
-
-        # Pénalité de stagnation locale (tourner en rond sur place < 32 px sur 15 pas = 3s)
-        pos = (m[ram.LINK + ram.OBJ_YH], m[ram.LINK + ram.OBJ_XH])
-        self.pos_history.append(pos)
-        if len(self.pos_history) == 15 and not cutscene and not in_menu:
-            span = max(max(p[0] for p in self.pos_history) - min(p[0] for p in self.pos_history),
-                       max(p[1] for p in self.pos_history) - min(p[1] for p in self.pos_history))
-            if span < 32:
-                r += W_LOCAL_STAGNATION
-
-        # Pénalité de stagnation en salle (> 35 pas = 7s dans la même pièce sans progrès)
-        if self.room_steps > 35 and not cutscene and not in_menu and not (new or paid > 0):
+        # Stagnation en salle, à taux fixe : seuil à 25 pas (5s) pour une salle inconnue, 15 pas (3s) sinon.
+        # Seuls un combat utile (paid > 0) ou un événement d'histoire apportent un sursis.
+        stagnation_threshold = 25 if self.room_is_new else 15
+        has_real_progress = (paid > 0) or (t.story > story)
+        if self.room_steps > stagnation_threshold and not stagnation_immune and not has_real_progress:
             r += W_ROOM_STAGNATION
+
+        if m[ram.OPENED_MENU]:
+            r += W_MENU
 
         # Dégâts subis (par quart de coeur)
         hp = m[ram.LINK_HEALTH]
@@ -259,36 +218,35 @@ class Episode:
             r += W_DAMAGE * (self.health - hp)
         self.health = hp
 
-        # Exploration de l'inventaire : récompense la première fois qu'un objet est équipé
+        # Suivi des objets équipés (sans récompense ni sursis, pour ne pas inciter à errer dans le menu)
         cur_items = {m[EQUIP_B], m[EQUIP_A]} - {0}
         new_items = cur_items - self.equipped_items
         if new_items:
             self.equipped_items |= new_items
-            r += W_EQUIP * len(new_items)
 
-        # Micro-bonus pour chaque rubis gagné (ramassé)
-        cur_rupees = bcd_rupees(m)
-        rupees_gained = cur_rupees - self.rupees
-        if rupees_gained > 0:
-            r += W_RUPEE * rupees_gained
-        self.rupees = cur_rupees
+        if room_is_new or paid > 0 or (t.story > story):
+            self.idle = 0
+        elif not stagnation_immune:
+            self.idle += 1
 
+        is_timeout = (self.idle >= self.patience) and not t.dead and (self.steps < self.horizon)
         if t.dead:
             r += W_DEATH
+        elif is_timeout:
+            r += W_PATIENCE_TIMEOUT
+
         self.steps += 1
         self.ret += r
-        if new or paid > 0 or new_items or rupees_gained > 0:
-            self.idle = 0
-        elif not cutscene:
-            self.idle += 1
         done = t.dead or self.steps >= self.horizon or self.idle >= self.patience
         info = None
         if done:
             g = self.gain()
             info = {"demo": self.demo, "ptr": self.ptr, "idx": self.idx, "gain": g,
                     "target": self.target, "success": self.target is not None and g >= self.target,
+                    "rooms": len(self.rooms - self.prefill_rooms), "kinds": len(self.kinds - self.prefill_kinds),
                     "score": len(self.rooms - self.prefill_rooms) + len(self.kinds - self.prefill_kinds),
-                    "story": t.story, "kills": t.kills, "steps": self.steps, "return": self.ret, "dead": t.dead}
+                    "story": t.story, "kills": t.kills, "steps": self.steps, "return": self.ret, "dead": t.dead,
+                    "timeout": is_timeout}
         return observe(self.env, self.observer), r, done, info
 
 

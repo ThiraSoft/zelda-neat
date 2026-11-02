@@ -11,6 +11,7 @@ from zneat import ram
 from zneat.archive import Archive, key_str, read_state
 from zneat.env import ZeldaEnv
 from zneat.paths import pick_targets, replay, seed_state
+from zneat.runner import FRAMES_PER_ACTION
 
 _env = None
 
@@ -49,7 +50,7 @@ def main():
         print("aucun chemin : l'archive date d'avant l'enregistrement des chemins, il faut un nouveau run")
         return
     longest = max(reach.values())
-    print(f"chemin le plus long : {longest} pas ({longest * 4 / 60:.0f} s de jeu)")
+    print(f"chemin le plus long : {longest} pas ({longest * FRAMES_PER_ACTION / 60:.0f} s de jeu)")
     for k in pick_targets(archive, 5):
         print(f"  cible {key_str(k)} : histoire {k[3]}, {reach[k]} pas")
     if args.check:

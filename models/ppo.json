@@ -1,1 +1,31 @@
-{"score": 5, "step": 20916224, "milestone": "20.92M", "arch": "impala", "menu_time_pct": 0.0, "date": "2026-10-30"}
+{
+ "step": 20000000,
+ "milestone": "20M",
+ "arch": "impala",
+ "run": "iter2",
+ "frames_per_action": 12,
+ "eval": {
+  "games": 30,
+  "salles": 5.333333333333333,
+  "salles_max": 24,
+  "types": 0.5,
+  "kills": 0.9,
+  "kills_par_type": 1.8,
+  "morts_pct": 16.666666666666668,
+  "duree_s": 107.26666666666667,
+  "menu_pct": 1.4481044126786824,
+  "dialogue_pct": 3.6917339962709756,
+  "items_changes": 2,
+  "actions_pct": {
+   "down": 13.3,
+   "right": 11.8,
+   "left": 10.3,
+   "up": 9.6,
+   "a+down": 8.4,
+   "a+right": 8.1,
+   "rien": 7.6,
+   "b+left": 6.0
+  }
+ },
+ "date": "2026-11-02"
+}
